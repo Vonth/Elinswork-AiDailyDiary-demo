@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>灵感记录</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f7f5f0; color: #2c2c2a; min-height: 100vh; }
+  .container { max-width: 680px; margin: 0 auto; padding: 2rem 1.25rem; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
+  .header h1 { font-size: 18px; font-weight: 500; color: #2c2c2a; }
+  .header .date { font-size: 12px; color: #888780; margin-top: 3px; }
+  .tabs { display: flex; gap: 6px; }
+  .tab { font-size: 13px; padding: 5px 13px; border-radius: 8px; border: 1px solid #d3d1c7; background: transparent; color: #5f5e5a; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+  .tab.active { background: #fff; color: #2c2c2a; }
+  .messages { min-height: 320px; margin-bottom: 1rem; }
+  .empty { text-align: center; padding: 5rem 0; color: #b4b2a9; font-size: 14px; }
+  .bubble-wrap { display: flex; margin-bottom: 10px; }
+  .bubble-wrap.user { justify-content: flex-end; }
+  .bubble-wrap.assistant { justify-content: flex-start; }
+  .bubble { max-width: 78%; padding: 9px 13px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+  .bubble.user { background: #e6f1fb; color: #185fa5; border-radius: 12px 12px 3px 12px; border: 1px solid #b5d4f4; }
+  .bubble.assistant { background: #fff; color: #2c2c2a; border-radius: 12px 12px 12px 3px; border: 1px solid #e8e6e0; }
+  .input-area { display: flex; gap: 8px; margin-bottom: 10px; }
+  textarea { flex: 1; resize: none; font-size: 14px; padding: 9px 12px; border-radius: 8px; border: 1px solid #d3d1c7; background: #fff; color: #2c2c2a; line-height: 1.6; outline: none; font-family: inherit; }
+  textarea:focus { border-color: #b4b2a9; }
+  .btn { font-size: 14px; padding: 0 16px; border-radius: 8px; border: 1px solid #d3d1c7; background: transparent; color: #2c2c2a; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+  .btn:hover:not(:disabled) { background: #f0ede6; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-wide { width: 100%; padding: 9px; font-size: 13px; color: #888780; }
+  .record-card { margin-bottom: 14px; padding: 1rem 1.25rem; background: #fff; border: 1px solid #e8e6e0; border-radius: 12px; }
+  .record-date { font-size: 12px; color: #b4b2a9; font-weight: 500; margin-bottom: 10px; }
+  .record-content { font-size: 14px; line-height: 1.8; color: #2c2c2a; white-space: pre-wrap; }
+  .settings-box { background: #fff; border: 1px solid #e8e6e0; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .settings-box h3 { font-size: 12px; font-weight: 500; color: #b4b2a9; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .field { margin-bottom: 10px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { font-size: 13px; color: #5f5e5a; display: block; margin-bottom: 5px; }
+  .field input, .field select { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid #d3d1c7; font-size: 13px; font-family: inherit; outline: none; background: #f7f5f0; color: #2c2c2a; }
+  .field input:focus, .field select:focus { border-color: #b4b2a9; background: #fff; }
+  .hint { font-size: 11px; color: #b4b2a9; margin-top: 4px; }
+  .warning { background: #faeeda; border: 1px solid #fac775; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #633806; margin-bottom: 1rem; display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1>灵感记录</h1>
+      <div class="date" id="today-label"></div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('chat')">聊天</button>
+      <button class="tab" onclick="switchTab('records')">记录</button>
+      <button class="tab" onclick="switchTab('settings')">设置</button>
+    </div>
+  </div>
+
+  <div id="panel-chat">
+    <div class="warning" id="api-warning">请先在「设置」里填入 API Key，然后选择使用 DeepSeek 或 Claude</div>
+    <div class="messages" id="messages">
+      <div class="empty" id="empty-hint">今天有什么想法？随便聊聊</div>
+    </div>
+    <div class="input-area">
+      <textarea id="input-box" placeholder="随便说点什么..." rows="2" onkeydown="handleKey(event)"></textarea>
+      <button class="btn" id="btn-send" onclick="send()" style="align-self:stretch">发送</button>
+    </div>
+    <button class="btn btn-wide" id="btn-summarize" onclick="summarize()" style="display:none">整理今日记录</button>
+  </div>
+
+  <div id="panel-records" style="display:none">
+    <div id="records-list"><div class="empty">还没有记录，先去聊聊吧</div></div>
+  </div>
+
+  <div id="panel-settings" style="display:none">
+    <div class="settings-box">
+      <h3>API 配置</h3>
+      <div class="field">
+        <label>使用哪个 AI</label>
+        <select id="provider-select" onchange="onProviderChange()">
+          <option value="deepseek">DeepSeek</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+        </select>
+      </div>
+      <div class="field" id="field-deepseek">
+        <label>DeepSeek API Key</label>
+        <input type="password" id="deepseek-key" placeholder="sk-..." />
+        <div class="hint">在 platform.deepseek.com → API Keys 获取</div>
+      </div>
+      <div class="field" id="field-anthropic" style="display:none">
+        <label>Anthropic API Key</label>
+        <input type="password" id="anthropic-key" placeholder="sk-ant-..." />
+        <div class="hint">在 console.anthropic.com → API Keys 获取</div>
+      </div>
+      <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+        <button class="btn" onclick="saveSettings()" style="padding:7px 18px;font-size:13px">保存设置</button>
+        <span id="save-tip" style="font-size:12px;color:#0f6e56;display:none">✓ 已保存</span>
+      </div>
+    </div>
+    <div class="settings-box">
+      <h3>数据管理</h3>
+      <div class="field">
+        <label>清除所有聊天记录和整理内容</label>
+        <button class="btn" onclick="clearAll()" style="margin-top:6px;font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除全部数据</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CHAT_SYSTEM = `你是一个私人灵感伙伴，陪用户随手记录生活中的想法、灵感、点子和感受。用轻松自然的方式聊天，像朋友一样倾听和回应，不要太正式。当用户分享想法时，可以适当追问一两句，帮助TA想得更深一点。回复简洁，一般不超过3句话。用中文回复。`;
+const SUMMARY_PROMPT = `请根据下面的对话，整理出今天的记录。格式：
+
+今日灵感
+• [用户今天提到的主要想法，每条一句话，简洁]
+
+值得继续想的
+• [1-2条值得深入的方向]
+
+只保留用户真正提到的内容，不要编造。用中文，简洁。`;
+
+let messages = [];
+const todayKey = new Date().toISOString().split('T')[0];
+document.getElementById('today-label').textContent =
+  new Date().toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric'});
+
+function loadSettings() {
+  document.getElementById('provider-select').value = localStorage.getItem('provider') || 'deepseek';
+  document.getElementById('deepseek-key').value = localStorage.getItem('deepseek-key') || '';
+  document.getElementById('anthropic-key').value = localStorage.getItem('anthropic-key') || '';
+  onProviderChange();
+}
+
+function onProviderChange() {
+  const p = document.getElementById('provider-select').value;
+  document.getElementById('field-deepseek').style.display = p === 'deepseek' ? '' : 'none';
+  document.getElementById('field-anthropic').style.display = p === 'anthropic' ? '' : 'none';
+}
+
+function saveSettings() {
+  localStorage.setItem('provider', document.getElementById('provider-select').value);
+  localStorage.setItem('deepseek-key', document.getElementById('deepseek-key').value.trim());
+  localStorage.setItem('anthropic-key', document.getElementById('anthropic-key').value.trim());
+  const tip = document.getElementById('save-tip');
+  tip.style.display = 'inline';
+  setTimeout(() => tip.style.display = 'none', 2000);
+}
+
+function getConfig() {
+  const provider = localStorage.getItem('provider') || 'deepseek';
+  const key = provider === 'deepseek'
+    ? (localStorage.getItem('deepseek-key') || '')
+    : (localStorage.getItem('anthropic-key') || '');
+  return { provider, key: key.trim() };
+}
+
+function hasKey() { return !!getConfig().key; }
+
+const savedChat = localStorage.getItem('chat-' + todayKey);
+if (savedChat) { messages = JSON.parse(savedChat); renderMessages(); }
+loadSettings();
+renderRecords();
+
+function switchTab(tab) {
+  ['chat','records','settings'].forEach(t => {
+    document.getElementById('panel-' + t).style.display = t === tab ? '' : 'none';
+    document.querySelectorAll('.tab')[['chat','records','settings'].indexOf(t)].classList.toggle('active', t === tab);
+  });
+  if (tab === 'chat') document.getElementById('api-warning').style.display = hasKey() ? 'none' : '';
+  if (tab === 'records') renderRecords();
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+function renderMessages() {
+  const c = document.getElementById('messages');
+  const empty = document.getElementById('empty-hint');
+  if (!messages.length) { if(empty) empty.style.display=''; return; }
+  if(empty) empty.style.display = 'none';
+  c.innerHTML = messages.map(m =>
+    `<div class="bubble-wrap ${m.role}"><div class="bubble ${m.role}">${esc(m.content)}</div></div>`
+  ).join('');
+  c.scrollTop = c.scrollHeight;
+  document.getElementById('btn-summarize').style.display = 'block';
+}
+
+async function callAI(msgs, system) {
+  const { provider, key } = getConfig();
+  if (!key) throw new Error('请先在设置里填入 API Key');
+
+  if (provider === 'deepseek') {
+    const allMsgs = system ? [{role:'system', content:system}, ...msgs] : msgs;
+    const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify({ model: 'deepseek-chat', messages: allMsgs, max_tokens: 1000 })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error.message);
+    return d.choices[0].message.content;
+  } else {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        ...(system ? { system } : {}),
+        messages: msgs
+      })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error.message);
+    return d.content[0].text;
+  }
+}
+
+async function send() {
+  if (!hasKey()) { document.getElementById('api-warning').style.display = ''; return; }
+  const box = document.getElementById('input-box');
+  const text = box.value.trim();
+  if (!text) return;
+
+  messages.push({ role: 'user', content: text });
+  box.value = '';
+  renderMessages();
+
+  const c = document.getElementById('messages');
+  const t = document.createElement('div');
+  t.id = 'typing'; t.className = 'bubble-wrap assistant';
+  t.innerHTML = '<div class="bubble assistant" style="color:#b4b2a9">···</div>';
+  c.appendChild(t); c.scrollTop = c.scrollHeight;
+  document.getElementById('btn-send').disabled = true;
+
+  try {
+    const reply = await callAI(messages, CHAT_SYSTEM);
+    messages.push({ role: 'assistant', content: reply });
+    localStorage.setItem('chat-' + todayKey, JSON.stringify(messages));
+  } catch(e) {
+    messages.push({ role: 'assistant', content: '出错了：' + e.message });
+  }
+
+  document.getElementById('typing')?.remove();
+  renderMessages();
+  document.getElementById('btn-send').disabled = false;
+}
+
+async function summarize() {
+  if (!messages.length) return;
+  const btn = document.getElementById('btn-summarize');
+  btn.disabled = true; btn.textContent = '整理中...';
+  const conv = messages.map(m => (m.role==='user'?'我':'助手') + '：' + m.content).join('\n');
+  try {
+    const content = await callAI([{ role:'user', content: SUMMARY_PROMPT + '\n\n对话：\n' + conv }], null);
+    const record = { date: todayKey, label: new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric'}), content };
+    let records = JSON.parse(localStorage.getItem('records') || '[]');
+    records = [record, ...records.filter(r => r.date !== todayKey)];
+    localStorage.setItem('records', JSON.stringify(records));
+    switchTab('records');
+  } catch(e) { alert('整理失败：' + e.message); }
+  btn.disabled = false; btn.textContent = '整理今日记录';
+}
+
+function renderRecords() {
+  const records = JSON.parse(localStorage.getItem('records') || '[]');
+  const c = document.getElementById('records-list');
+  if (!records.length) { c.innerHTML = '<div class="empty">还没有记录，先去聊聊吧</div>'; return; }
+  c.innerHTML = records.map(r =>
+    `<div class="record-card"><div class="record-date">${r.label}</div><div class="record-content">${esc(r.content)}</div></div>`
+  ).join('');
+}
+
+function clearAll() {
+  if (!confirm('确定清除所有聊天和记录吗？')) return;
+  Object.keys(localStorage).filter(k => k.startsWith('chat-') || k === 'records').forEach(k => localStorage.removeItem(k));
+  messages = []; renderMessages(); renderRecords(); alert('已清除');
+}
+</script>
+</body>
+</html>
