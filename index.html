@@ -14,6 +14,14 @@
   .tabs { display: flex; gap: 6px; }
   .tab { font-size: 13px; padding: 5px 13px; border-radius: 8px; border: 1px solid #d3d1c7; background: transparent; color: #5f5e5a; cursor: pointer; font-family: inherit; transition: background 0.15s; }
   .tab.active { background: #fff; color: #2c2c2a; }
+
+  /* 话题导航 */
+  .session-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .nav-btn { font-size: 13px; padding: 4px 10px; border-radius: 7px; border: 1px solid #d3d1c7; background: transparent; color: #5f5e5a; cursor: pointer; font-family: inherit; transition: background 0.15s; white-space: nowrap; }
+  .nav-btn:hover:not(:disabled) { background: #f0ede6; }
+  .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .nav-label { font-size: 13px; color: #888780; flex: 1; text-align: center; }
+
   .messages { min-height: 320px; margin-bottom: 1rem; }
   .empty { text-align: center; padding: 5rem 0; color: #b4b2a9; font-size: 14px; }
   .bubble-wrap { display: flex; margin-bottom: 10px; }
@@ -41,6 +49,10 @@
   .field input:focus, .field select:focus { border-color: #b4b2a9; background: #fff; }
   .hint { font-size: 11px; color: #b4b2a9; margin-top: 4px; }
   .warning { background: #faeeda; border: 1px solid #fac775; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #633806; margin-bottom: 1rem; display: none; }
+
+  /* 记忆预览 */
+  .memory-preview { font-size: 13px; color: #5f5e5a; line-height: 1.75; background: #f7f5f0; border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; min-height: 60px; }
+  .memory-empty { color: #b4b2a9; font-style: italic; }
 </style>
 </head>
 <body>
@@ -59,9 +71,8 @@
 
   <div id="panel-chat">
     <div class="warning" id="api-warning">请先在「设置」里填入 API Key，然后选择使用 DeepSeek 或 Claude</div>
-    <div class="messages" id="messages">
-      <div class="empty" id="empty-hint">今天有什么想法？随便聊聊</div>
-    </div>
+    <div class="session-nav" id="session-nav"></div>
+    <div class="messages" id="messages"></div>
     <div class="input-area">
       <textarea id="input-box" placeholder="随便说点什么..." rows="2" onkeydown="handleKey(event)"></textarea>
       <button class="btn" id="btn-send" onclick="send()" style="align-self:stretch">发送</button>
@@ -98,10 +109,22 @@
         <span id="save-tip" style="font-size:12px;color:#0f6e56;display:none">✓ 已保存</span>
       </div>
     </div>
+
+    <div class="settings-box">
+      <h3>AI 的记忆</h3>
+      <div class="field">
+        <label>AI 目前对你的了解（每次整理记录后自动更新）</label>
+        <div class="memory-preview" id="memory-preview"></div>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn" onclick="clearMemory()" style="font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除记忆</button>
+      </div>
+    </div>
+
     <div class="settings-box">
       <h3>数据管理</h3>
       <div class="field">
-        <label>清除所有聊天记录和整理内容</label>
+        <label>清除所有聊天记录、整理内容和记忆</label>
         <button class="btn" onclick="clearAll()" style="margin-top:6px;font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除全部数据</button>
       </div>
     </div>
@@ -109,21 +132,93 @@
 </div>
 
 <script>
-const CHAT_SYSTEM = `你是一个私人灵感伙伴，陪用户随手记录生活中的想法、灵感、点子和感受。用轻松自然的方式聊天，像朋友一样倾听和回应，不要太正式。当用户分享想法时，可以适当追问一两句，帮助TA想得更深一点。回复简洁，一般不超过3句话。用中文回复。`;
-const SUMMARY_PROMPT = `请根据下面的对话，整理出今天的记录。格式：
+// ── Prompts ──────────────────────────────────────────────────────────────────
+
+const CHAT_SYSTEM_BASE = `你是一个私人灵感伙伴，陪用户随手记录生活中的想法、灵感、点子和感受。用轻松自然的方式聊天，像朋友一样倾听和回应，不要太正式。当用户分享想法时，可以适当追问一两句，帮助TA想得更深一点。回复简洁，一般不超过3句话。用中文回复。`;
+
+const SUMMARY_PROMPT = `请根据下面今天所有的对话，整理出一篇今日记录。格式：
 
 今日灵感
-• [用户今天提到的主要想法，每条一句话，简洁]
+• [今天提到的主要想法，每条一句话，简洁]
 
 值得继续想的
 • [1-2条值得深入的方向]
 
 只保留用户真正提到的内容，不要编造。用中文，简洁。`;
 
-let messages = [];
+const MEMORY_PROMPT = `根据下面的今日对话和已有的用户记忆，更新用户画像。
+包含：用户正在做的事、关注的主题、近期情绪状态、性格偏好、上次聊到的重要内容。
+写成一段自然的描述，200字以内，用中文。只输出更新后的用户画像文字，不要任何前缀或说明。`;
+
+// ── 初始化 ───────────────────────────────────────────────────────────────────
+
 const todayKey = new Date().toISOString().split('T')[0];
 document.getElementById('today-label').textContent =
-  new Date().toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric'});
+  new Date().toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
+
+let sessions = [];          // [{id, messages:[]}]
+let currentIdx = 0;
+
+function currentMsgs() { return sessions[currentIdx].messages; }
+
+function loadTodaySessions() {
+  // 迁移旧格式 chat-日期 → sessions-日期
+  const oldKey = 'chat-' + todayKey;
+  const newKey = 'sessions-' + todayKey;
+  if (localStorage.getItem(oldKey) && !localStorage.getItem(newKey)) {
+    const msgs = JSON.parse(localStorage.getItem(oldKey) || '[]');
+    if (msgs.length) {
+      sessions = [{ id: Date.now(), messages: msgs }];
+      saveSessions();
+      localStorage.removeItem(oldKey);
+      return;
+    }
+  }
+  const saved = localStorage.getItem(newKey);
+  sessions = saved ? JSON.parse(saved) : [];
+  if (!sessions.length) sessions = [{ id: Date.now(), messages: [] }];
+  currentIdx = sessions.length - 1; // 默认定位到最新话题
+  saveSessions();
+}
+
+function saveSessions() {
+  localStorage.setItem('sessions-' + todayKey, JSON.stringify(sessions));
+}
+
+function getChatSystem() {
+  const mem = localStorage.getItem('user-memory') || '';
+  return mem ? CHAT_SYSTEM_BASE + '\n\n关于用户的记忆：\n' + mem : CHAT_SYSTEM_BASE;
+}
+
+// ── 话题导航 UI ──────────────────────────────────────────────────────────────
+
+function renderSessionNav() {
+  const total = sessions.length;
+  const i = currentIdx;
+  document.getElementById('session-nav').innerHTML =
+    `<button class="nav-btn" onclick="gotoSession(${i-1})" ${i===0?'disabled':''}>←</button>
+     <span class="nav-label">话题 ${i+1} / ${total}</span>
+     <button class="nav-btn" onclick="gotoSession(${i+1})" ${i===total-1?'disabled':''}>→</button>
+     <button class="nav-btn" onclick="newSession()" style="margin-left:4px">＋ 新话题</button>`;
+}
+
+function gotoSession(i) {
+  if (i < 0 || i >= sessions.length) return;
+  currentIdx = i;
+  renderMessages();
+  renderSessionNav();
+}
+
+function newSession() {
+  sessions.push({ id: Date.now(), messages: [] });
+  saveSessions();
+  currentIdx = sessions.length - 1;
+  renderMessages();
+  renderSessionNav();
+  document.getElementById('input-box').focus();
+}
+
+// ── 设置 ─────────────────────────────────────────────────────────────────────
 
 function loadSettings() {
   document.getElementById('provider-select').value = localStorage.getItem('provider') || 'deepseek';
@@ -157,19 +252,28 @@ function getConfig() {
 
 function hasKey() { return !!getConfig().key; }
 
-const savedChat = localStorage.getItem('chat-' + todayKey);
-if (savedChat) { messages = JSON.parse(savedChat); renderMessages(); }
+// ── 页面启动 ─────────────────────────────────────────────────────────────────
+
+loadTodaySessions();
 loadSettings();
+renderMessages();
+renderSessionNav();
 renderRecords();
+
+// ── Tab 切换 ─────────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
   ['chat','records','settings'].forEach(t => {
     document.getElementById('panel-' + t).style.display = t === tab ? '' : 'none';
-    document.querySelectorAll('.tab')[['chat','records','settings'].indexOf(t)].classList.toggle('active', t === tab);
+    document.querySelectorAll('.tab')[['chat','records','settings'].indexOf(t)]
+      .classList.toggle('active', t === tab);
   });
-  if (tab === 'chat') document.getElementById('api-warning').style.display = hasKey() ? 'none' : '';
-  if (tab === 'records') renderRecords();
+  if (tab === 'chat')     document.getElementById('api-warning').style.display = hasKey() ? 'none' : '';
+  if (tab === 'records')  renderRecords();
+  if (tab === 'settings') renderMemoryPreview();
 }
+
+// ── 消息渲染 ─────────────────────────────────────────────────────────────────
 
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -180,23 +284,29 @@ function esc(s) {
 }
 
 function renderMessages() {
+  const msgs = currentMsgs();
   const c = document.getElementById('messages');
-  const empty = document.getElementById('empty-hint');
-  if (!messages.length) { if(empty) empty.style.display=''; return; }
-  if(empty) empty.style.display = 'none';
-  c.innerHTML = messages.map(m =>
-    `<div class="bubble-wrap ${m.role}"><div class="bubble ${m.role}">${esc(m.content)}</div></div>`
-  ).join('');
-  c.scrollTop = c.scrollHeight;
-  document.getElementById('btn-summarize').style.display = 'block';
+  if (!msgs.length) {
+    c.innerHTML = '<div class="empty">今天有什么想法？随便聊聊</div>';
+  } else {
+    c.innerHTML = msgs.map(m =>
+      `<div class="bubble-wrap ${m.role}"><div class="bubble ${m.role}">${esc(m.content)}</div></div>`
+    ).join('');
+    c.scrollTop = c.scrollHeight;
+  }
+  // 只要今天任意话题有内容，就显示整理按钮
+  const hasMsgs = sessions.some(s => s.messages.length > 0);
+  document.getElementById('btn-summarize').style.display = hasMsgs ? 'block' : 'none';
 }
+
+// ── AI 调用 ──────────────────────────────────────────────────────────────────
 
 async function callAI(msgs, system) {
   const { provider, key } = getConfig();
   if (!key) throw new Error('请先在设置里填入 API Key');
 
   if (provider === 'deepseek') {
-    const allMsgs = system ? [{role:'system', content:system}, ...msgs] : msgs;
+    const allMsgs = system ? [{ role:'system', content:system }, ...msgs] : msgs;
     const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
@@ -227,13 +337,15 @@ async function callAI(msgs, system) {
   }
 }
 
+// ── 发送消息 ─────────────────────────────────────────────────────────────────
+
 async function send() {
   if (!hasKey()) { document.getElementById('api-warning').style.display = ''; return; }
   const box = document.getElementById('input-box');
   const text = box.value.trim();
   if (!text) return;
 
-  messages.push({ role: 'user', content: text });
+  currentMsgs().push({ role: 'user', content: text });
   box.value = '';
   renderMessages();
 
@@ -245,11 +357,11 @@ async function send() {
   document.getElementById('btn-send').disabled = true;
 
   try {
-    const reply = await callAI(messages, CHAT_SYSTEM);
-    messages.push({ role: 'assistant', content: reply });
-    localStorage.setItem('chat-' + todayKey, JSON.stringify(messages));
+    const reply = await callAI(currentMsgs(), getChatSystem());
+    currentMsgs().push({ role: 'assistant', content: reply });
+    saveSessions();
   } catch(e) {
-    messages.push({ role: 'assistant', content: '出错了：' + e.message });
+    currentMsgs().push({ role: 'assistant', content: '出错了：' + e.message });
   }
 
   document.getElementById('typing')?.remove();
@@ -257,35 +369,100 @@ async function send() {
   document.getElementById('btn-send').disabled = false;
 }
 
+// ── 整理今日记录 + 更新记忆 ──────────────────────────────────────────────────
+
 async function summarize() {
-  if (!messages.length) return;
+  const activeSessions = sessions.filter(s => s.messages.length > 0);
+  if (!activeSessions.length) return;
+
   const btn = document.getElementById('btn-summarize');
-  btn.disabled = true; btn.textContent = '整理中...';
-  const conv = messages.map(m => (m.role==='user'?'我':'助手') + '：' + m.content).join('\n');
+  btn.disabled = true; btn.textContent = '整理中…';
+
+  // 把所有话题拼成一段文字送给 AI
+  let conv = '';
+  activeSessions.forEach((s, i) => {
+    if (activeSessions.length > 1) conv += `【话题 ${i + 1}】\n`;
+    conv += s.messages.map(m => (m.role === 'user' ? '我' : '助手') + '：' + m.content).join('\n');
+    conv += '\n\n';
+  });
+
   try {
-    const content = await callAI([{ role:'user', content: SUMMARY_PROMPT + '\n\n对话：\n' + conv }], null);
-    const record = { date: todayKey, label: new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric'}), content };
+    // 第一步：生成今日记录
+    const content = await callAI(
+      [{ role: 'user', content: SUMMARY_PROMPT + '\n\n对话：\n' + conv }], null
+    );
+    const record = {
+      date: todayKey,
+      label: new Date().toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'}),
+      content
+    };
     let records = JSON.parse(localStorage.getItem('records') || '[]');
     records = [record, ...records.filter(r => r.date !== todayKey)];
     localStorage.setItem('records', JSON.stringify(records));
+
+    // 第二步：更新 AI 记忆
+    const existingMem = localStorage.getItem('user-memory') || '（暂无）';
+    const newMem = await callAI(
+      [{ role: 'user', content: MEMORY_PROMPT + '\n\n已有记忆：\n' + existingMem + '\n\n今天的对话：\n' + conv }], null
+    );
+    localStorage.setItem('user-memory', newMem);
+
     switchTab('records');
-  } catch(e) { alert('整理失败：' + e.message); }
+  } catch(e) {
+    alert('整理失败：' + e.message);
+  }
+
   btn.disabled = false; btn.textContent = '整理今日记录';
 }
+
+// ── 记录页 ───────────────────────────────────────────────────────────────────
 
 function renderRecords() {
   const records = JSON.parse(localStorage.getItem('records') || '[]');
   const c = document.getElementById('records-list');
   if (!records.length) { c.innerHTML = '<div class="empty">还没有记录，先去聊聊吧</div>'; return; }
   c.innerHTML = records.map(r =>
-    `<div class="record-card"><div class="record-date">${r.label}</div><div class="record-content">${esc(r.content)}</div></div>`
+    `<div class="record-card">
+       <div class="record-date">${r.label}</div>
+       <div class="record-content">${esc(r.content)}</div>
+     </div>`
   ).join('');
 }
 
+// ── 设置页：记忆 ─────────────────────────────────────────────────────────────
+
+function renderMemoryPreview() {
+  const mem = localStorage.getItem('user-memory') || '';
+  const el = document.getElementById('memory-preview');
+  if (mem) {
+    el.textContent = mem;
+    el.classList.remove('memory-empty');
+  } else {
+    el.textContent = '还没有记忆，整理第一次记录后会自动生成';
+    el.classList.add('memory-empty');
+  }
+}
+
+function clearMemory() {
+  if (!confirm('确定清除 AI 的记忆吗？')) return;
+  localStorage.removeItem('user-memory');
+  renderMemoryPreview();
+}
+
+// ── 清除全部数据 ─────────────────────────────────────────────────────────────
+
 function clearAll() {
-  if (!confirm('确定清除所有聊天和记录吗？')) return;
-  Object.keys(localStorage).filter(k => k.startsWith('chat-') || k === 'records').forEach(k => localStorage.removeItem(k));
-  messages = []; renderMessages(); renderRecords(); alert('已清除');
+  if (!confirm('确定清除所有聊天、记录和 AI 记忆吗？')) return;
+  Object.keys(localStorage)
+    .filter(k => k.startsWith('chat-') || k.startsWith('sessions-') || k === 'records' || k === 'user-memory')
+    .forEach(k => localStorage.removeItem(k));
+  sessions = [{ id: Date.now(), messages: [] }];
+  currentIdx = 0;
+  saveSessions();
+  renderMessages();
+  renderSessionNav();
+  renderRecords();
+  alert('已清除');
 }
 </script>
 </body>
