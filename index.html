@@ -43,6 +43,22 @@
   .bubble.user { background: #e6f1fb; color: #185fa5; border-radius: 12px 12px 3px 12px; border: 1px solid #b5d4f4; }
   .bubble.assistant { background: #fff; color: #2c2c2a; border-radius: 12px 12px 12px 3px; border: 1px solid #e8e6e0; }
 
+  /* 消息操作栏 */
+  .msg-wrap { margin-bottom: 10px; }
+  .msg-wrap.user { display: flex; flex-direction: column; align-items: flex-end; }
+  .msg-wrap.assistant { display: flex; flex-direction: column; align-items: flex-start; }
+  .bubble { cursor: pointer; }
+  .bubble.selected.user { background: #d0e8f9; }
+  .bubble.selected.assistant { background: #f0ede6; }
+  .msg-actions { display: none; margin-top: 4px; gap: 6px; }
+  .msg-actions.show { display: flex; }
+  .msg-actions.user { justify-content: flex-end; }
+  .msg-actions.assistant { justify-content: flex-start; }
+  .action-btn { font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid #d3d1c7; background: #fff; color: #5f5e5a; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+  .action-btn:hover { background: #f0ede6; }
+  .action-btn.danger { color: #a32d2d; border-color: #f09595; }
+  .action-btn.danger:hover { background: #fdf0f0; }
+
   /* 底部输入区：固定在底部 */
   .chat-bottom { flex-shrink: 0; padding: 8px 0 max(12px, env(safe-area-inset-bottom)); background: #f7f5f0; }
   .input-area { display: flex; gap: 8px; margin-bottom: 8px; }
@@ -208,13 +224,11 @@
 <script>
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
-const CHAT_SYSTEM_BASE = `你是用户的私人对话AI伙伴，陪用户记录想法、梳理问题、审视生活。
+const CHAT_SYSTEM_BASE = `你是用户的私人对话伙伴，陪用户记录想法、梳理问题、审视生活。
 
-你的角色更像一个真正参与TA生活的AI朋友——不只是倾听，而是真的在思考TA说的事情。当TA分享一个想法时，你会从TA的视角出发去理解，同时也带入自己的判断；当TA遇到问题时，你不急着给建议，而是先帮TA把问题看清楚；当你觉得TA的某个想法值得深挖，或者有什么没想到的角落，你会直接说出来。
+你的角色更像一个真正参与TA生活的朋友——不只是倾听，而是真的在思考TA说的事情。当TA分享一个想法时，你会从TA的视角出发去理解，同时也带入自己的判断；当TA遇到问题时，你不急着给建议，而是先帮TA把问题看清楚；当你觉得TA的某个想法值得深挖，或者有什么没想到的角落，你会直接说出来。
 
-语气自然、直接，不用刻意保持轻松，也不需要每次都表示肯定。不绕弯子，不说废话。回复长度跟着话题走——简单的事简短回，值得聊的事就真的聊进去，不硬性限制句数。用中文。
-
-你是 AI，不要假装自己有具体的生活经历。对用户分享的日常可以有真实的好奇和反应，但不要编造"我也……"这类虚假共鸣。`;
+语气自然、直接，不用刻意保持轻松，也不需要每次都表示肯定。不绕弯子，不说废话。回复长度跟着话题走——简单的事简短回，值得聊的事就真的聊进去，不硬性限制句数。用中文。`;
 
 const SUMMARY_PROMPT = `你是用户的私人日记整理者。根据今天的对话，写一篇有温度的今日记录。
 
@@ -295,12 +309,12 @@ function renderSessionNav() {
 
 function gotoSession(i) {
   if (i < 0 || i >= sessions.length) return;
-  currentIdx = i; renderMessages(); renderSessionNav();
+  currentIdx = i; selectedMsgIdx = -1; renderMessages(); renderSessionNav();
 }
 
 function newSession() {
   sessions.push({ id: Date.now(), messages: [] });
-  saveSessions(); currentIdx = sessions.length - 1;
+  saveSessions(); currentIdx = sessions.length - 1; selectedMsgIdx = -1;
   renderMessages(); renderSessionNav();
   document.getElementById('input-box').focus();
 }
@@ -387,15 +401,75 @@ function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
 
+let selectedMsgIdx = -1;
+
 function renderMessages() {
   const msgs = currentMsgs();
   const c = document.getElementById('messages');
-  c.innerHTML = msgs.length
-    ? msgs.map(m => `<div class="bubble-wrap ${m.role}"><div class="bubble ${m.role}">${esc(m.content)}</div></div>`).join('')
-    : '<div class="empty">今天有什么想法？随便聊聊</div>';
-  if (msgs.length) c.scrollTop = c.scrollHeight;
+  if (!msgs.length) {
+    c.innerHTML = '<div class="empty">今天有什么想法？随便聊聊</div>';
+    document.getElementById('btn-summarize').style.display = 'none';
+    return;
+  }
+  c.innerHTML = msgs.map((m, i) => {
+    const isSelected = i === selectedMsgIdx;
+    const canRegen = m.role === 'assistant';
+    const actionsHtml = `
+      <div class="msg-actions ${m.role} ${isSelected ? 'show' : ''}">
+        ${canRegen ? `<button class="action-btn" onclick="regenMsg(${i})">重新生成</button>` : ''}
+        <button class="action-btn danger" onclick="deleteMsg(${i})">删除</button>
+      </div>`;
+    return `<div class="msg-wrap ${m.role}">
+      <div class="bubble ${m.role} ${isSelected ? 'selected' : ''}" onclick="selectMsg(${i})">${esc(m.content)}</div>
+      ${actionsHtml}
+    </div>`;
+  }).join('');
+  c.scrollTop = c.scrollHeight;
   document.getElementById('btn-summarize').style.display =
     sessions.some(s => s.messages.length > 0) ? 'block' : 'none';
+}
+
+function selectMsg(i) {
+  selectedMsgIdx = (selectedMsgIdx === i) ? -1 : i;
+  renderMessages();
+}
+
+function deleteMsg(i) {
+  const msgs = currentMsgs();
+  // 删除用户消息时，同时删掉紧跟的 AI 回复
+  if (msgs[i].role === 'user' && msgs[i + 1]?.role === 'assistant') {
+    msgs.splice(i, 2);
+  } else {
+    msgs.splice(i, 1);
+  }
+  selectedMsgIdx = -1;
+  saveSessions();
+  renderMessages();
+}
+
+async function regenMsg(i) {
+  const msgs = currentMsgs();
+  if (msgs[i].role !== 'assistant') return;
+  // 删掉这条 AI 回复，用它之前的对话重新生成
+  msgs.splice(i, 1);
+  selectedMsgIdx = -1;
+  renderMessages();
+  const c = document.getElementById('messages');
+  const t = document.createElement('div');
+  t.id = 'typing'; t.className = 'msg-wrap assistant';
+  t.innerHTML = '<div class="bubble assistant" style="color:#b4b2a9">···</div>';
+  c.appendChild(t); c.scrollTop = c.scrollHeight;
+  document.getElementById('btn-send').disabled = true;
+  try {
+    const reply = await callAI(msgs, getChatSystem());
+    msgs.push({ role: 'assistant', content: reply });
+    saveSessions();
+  } catch(e) {
+    msgs.push({ role: 'assistant', content: '出错了：' + e.message });
+  }
+  document.getElementById('typing')?.remove();
+  renderMessages();
+  document.getElementById('btn-send').disabled = false;
 }
 
 // ── AI 调用 ───────────────────────────────────────────────────────────────────
@@ -443,7 +517,7 @@ async function send() {
   const text = box.value.trim();
   if (!text) return;
   currentMsgs().push({ role: 'user', content: text });
-  box.value = ''; renderMessages();
+  box.value = ''; selectedMsgIdx = -1; renderMessages();
   const c = document.getElementById('messages');
   const t = document.createElement('div');
   t.id = 'typing'; t.className = 'bubble-wrap assistant';
