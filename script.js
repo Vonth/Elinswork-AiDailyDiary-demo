@@ -83,6 +83,7 @@ let isChatRequestPending = false;
 let voiceStatusOverride = null;
 let recognition = null;
 let isRecording = false;
+const THEME_STORAGE_KEY = 'theme';
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function readJSON(key, fallback) {
@@ -196,8 +197,38 @@ function loadSettings() {
   document.getElementById('deepseek-key').value = localStorage.getItem('deepseek-key') || '';
   document.getElementById('anthropic-key').value = localStorage.getItem('anthropic-key') || '';
   document.getElementById('auto-toggle').checked = localStorage.getItem('auto-summarize') === 'on';
+  loadThemeSetting();
   onProviderChange();
   renderAutoSummarizeStatus();
+}
+
+function getThemeSetting() {
+  return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+}
+
+function updateThemeLabel(theme) {
+  const label = document.getElementById('theme-label');
+  if (!label) return;
+  label.textContent = theme === 'dark'
+    ? '当前是夜间模式，页面会变暗一些，晚上看更舒服。'
+    : '当前是日间模式，保持原来这种明亮风格。';
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'dark') {
+    root.dataset.theme = 'dark';
+  } else {
+    root.removeAttribute('data-theme');
+  }
+
+  const toggle = document.getElementById('theme-toggle');
+  if (toggle) toggle.checked = theme === 'dark';
+  updateThemeLabel(theme);
+}
+
+function loadThemeSetting() {
+  applyTheme(getThemeSetting());
 }
 
 function onProviderChange() {
@@ -219,6 +250,13 @@ function saveSettings() {
 function saveAutoSetting() {
   localStorage.setItem('auto-summarize', document.getElementById('auto-toggle').checked ? 'on' : 'off');
   renderAutoSummarizeStatus();
+}
+
+function saveThemeSetting() {
+  const theme = document.getElementById('theme-toggle').checked ? 'dark' : 'light';
+  localStorage.setItem(THEME_STORAGE_KEY, theme);
+  applyTheme(theme);
+  showToast(theme === 'dark' ? '已切换为夜间模式' : '已切换为日间模式');
 }
 
 function getConfig() {

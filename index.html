@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<script>
+  try {
+    if (localStorage.getItem('theme') === 'dark') {
+      document.documentElement.dataset.theme = 'dark';
+    }
+  } catch (error) {}
+</script>
 <title>灵感记录</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -69,6 +76,20 @@
         <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
           <button class="btn" onclick="saveSettings()" style="padding:7px 18px;font-size:13px">保存设置</button>
           <span id="save-tip" style="font-size:12px;color:#0f6e56;display:none">✓ 已保存</span>
+        </div>
+      </div>
+
+      <div class="settings-box">
+        <h3>外观</h3>
+        <div class="field">
+          <label>日夜模式</label>
+          <div class="toggle-row">
+            <label class="toggle-wrap">
+              <input type="checkbox" id="theme-toggle" onchange="saveThemeSetting()">
+              <span class="toggle-track"></span>
+            </label>
+            <span class="toggle-label" id="theme-label"></span>
+          </div>
         </div>
       </div>
 
