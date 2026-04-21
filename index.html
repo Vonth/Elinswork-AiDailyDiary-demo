@@ -34,18 +34,31 @@
     <div class="session-nav" id="session-nav"></div>
     <div class="messages" id="messages"></div>
     <div class="chat-bottom">
-      <div class="input-area">
-        <textarea id="input-box" placeholder="随便说点什么..." rows="2" onkeydown="handleKey(event)"></textarea>
-        <button class="btn-mic" id="btn-mic" onclick="toggleVoice()" title="语音输入">🎙️</button>
-        <button class="btn" id="btn-send" onclick="send()" style="align-self:stretch">发送</button>
+      <div class="composer-shell" id="composer-shell">
+        <textarea
+          id="input-box"
+          placeholder="随便说点什么..."
+          rows="2"
+          onkeydown="handleKey(event)"
+          oninput="handleComposerInput()"
+        ></textarea>
+        <div class="composer-actions">
+          <button class="btn-mic" id="btn-mic" onclick="toggleComposerMenu()" title="更多操作" aria-label="更多操作">···</button>
+          <button class="composer-send-btn" id="btn-send" onclick="send()" type="button">发送</button>
+        </div>
+        <div class="composer-menu" id="composer-menu">
+          <button class="composer-menu-item" id="composer-voice-action" onclick="triggerVoiceFromComposer()" type="button">语音输入</button>
+        </div>
       </div>
       <div class="status-note" id="voice-status" aria-live="polite"></div>
-      <button class="btn btn-wide" id="btn-summarize" onclick="summarize()" style="display:none">整理今日记录</button>
     </div>
   </div>
 
   <!-- 记录 panel -->
   <div class="panel" id="panel-records" style="display:none">
+    <div class="records-topbar" id="records-topbar" style="display:none">
+      <button class="action-btn records-summarize-btn" id="btn-summarize" onclick="summarize()" style="display:none">整理今日记录</button>
+    </div>
     <div class="records-scroll" id="records-list">
       <div class="empty">还没有记录，先去聊聊吧</div>
     </div>

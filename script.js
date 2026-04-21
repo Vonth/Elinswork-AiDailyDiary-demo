@@ -102,6 +102,7 @@ let sessionTitleEditingId = null;
 let sessionTitleDraft = '';
 let recordEditingDate = null;
 let recordEditDraft = '';
+let composerMenuOpen = false;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function formatDateLabel(dateKey) {
@@ -865,6 +866,87 @@ function renderStatusNote(id, info) {
   el.style.display = 'block';
 }
 
+function hasTodayChats() {
+  return sessions.some(session => session.messages.length > 0);
+}
+
+function renderSummarizeAction() {
+  const hasChats = hasTodayChats();
+  const bar = document.getElementById('records-topbar');
+  const btn = document.getElementById('btn-summarize');
+  if (bar) bar.style.display = hasChats ? '' : 'none';
+  if (!btn) return;
+  btn.style.display = hasChats ? '' : 'none';
+  btn.disabled = isChatRequestPending || !hasChats;
+}
+
+function renderComposerState() {
+  const shell = document.getElementById('composer-shell');
+  const box = document.getElementById('input-box');
+  const menuBtn = document.getElementById('btn-mic');
+  const sendBtn = document.getElementById('btn-send');
+  const menu = document.getElementById('composer-menu');
+  const hasText = !!box?.value.trim();
+  const isMenuVisible = composerMenuOpen && !isRecording;
+
+  if (shell) {
+    shell.classList.toggle('has-text', hasText);
+    shell.classList.toggle('menu-open', isMenuVisible);
+  }
+  if (sendBtn) {
+    sendBtn.classList.toggle('visible', hasText);
+    sendBtn.disabled = isChatRequestPending || !hasText;
+    sendBtn.setAttribute('aria-hidden', hasText ? 'false' : 'true');
+  }
+  if (menuBtn) {
+    menuBtn.classList.toggle('recording', isRecording);
+    menuBtn.classList.toggle('menu-open', isMenuVisible);
+    menuBtn.textContent = isRecording ? '⏹️' : '···';
+    menuBtn.setAttribute('aria-label', isRecording ? '停止语音输入' : '更多操作');
+    menuBtn.setAttribute('aria-expanded', isMenuVisible ? 'true' : 'false');
+  }
+  if (menu) {
+    menu.hidden = !isMenuVisible;
+    menu.setAttribute('aria-hidden', isMenuVisible ? 'false' : 'true');
+  }
+}
+
+function handleComposerInput() {
+  renderComposerState();
+}
+
+function closeComposerMenu() {
+  if (!composerMenuOpen) return;
+  composerMenuOpen = false;
+  renderComposerState();
+}
+
+function toggleComposerMenu() {
+  if (isRecording) {
+    toggleVoice();
+    return;
+  }
+  composerMenuOpen = !composerMenuOpen;
+  renderComposerState();
+}
+
+function triggerVoiceFromComposer() {
+  composerMenuOpen = false;
+  renderComposerState();
+  toggleVoice();
+}
+
+function handleDocumentClick(event) {
+  if (event.target.closest('.composer-shell')) return;
+  closeComposerMenu();
+}
+
+function handleDocumentKeydown(event) {
+  if (event.key === 'Escape' && composerMenuOpen && !isRecording) {
+    closeComposerMenu();
+  }
+}
+
 function getAutoSummarizeStatus() {
   if (localStorage.getItem('auto-summarize') !== 'on') {
     return { tone: 'muted', message: '当前已关闭，不会自动整理前一天的聊天。' };
@@ -925,7 +1007,7 @@ function getDefaultVoiceStatus() {
   return {
     available: true,
     tone: 'info',
-    message: '语音输入可用：点麦克风开始说话，再点一次可停止。',
+    message: '语音输入可用：点输入框里的更多按钮，再选语音输入开始说话。',
     visible: false
   };
 }
@@ -943,8 +1025,11 @@ function renderVoiceStatus() {
     const disabled = !status.available && !isRecording;
     btn.disabled = disabled;
     btn.classList.toggle('disabled', disabled);
-    btn.title = status.message || '语音输入';
+    btn.title = disabled
+      ? (status.message || '语音输入')
+      : (isRecording ? '停止语音输入' : '更多操作');
   }
+  renderComposerState();
   renderStatusNote('voice-status', status);
 }
 
@@ -993,12 +1078,15 @@ renderSessionNav();
 renderRecords();
 renderAutoSummarizeStatus();
 renderVoiceStatus();
+document.addEventListener('click', handleDocumentClick);
+document.addEventListener('keydown', handleDocumentKeydown);
 checkAutoSummarize();
 maybeAutoNameSession(sessions[currentIdx]?.id);
 
 // ── Tab 切换 ──────────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
+  if (tab !== 'chat') closeComposerMenu();
   ['chat','records','settings'].forEach(t => {
     document.getElementById('panel-' + t).style.display = t === tab ? '' : 'none';
     document.querySelectorAll('.tab')[['chat','records','settings'].indexOf(t)].classList.toggle('active', t === tab);
@@ -1024,8 +1112,8 @@ function showToast(msg, duration = 3500) {
 
 function setChatRequestPending(pending) {
   isChatRequestPending = pending;
-  const sendBtn = document.getElementById('btn-send');
-  if (sendBtn) sendBtn.disabled = pending;
+  renderComposerState();
+  renderSummarizeAction();
   renderSessionNav();
 }
 
@@ -1044,7 +1132,8 @@ function renderMessages() {
   const c = document.getElementById('messages');
   if (!msgs.length) {
     c.innerHTML = '<div class="empty">今天有什么想法？随便聊聊</div>';
-    document.getElementById('btn-summarize').style.display = 'none';
+    renderSummarizeAction();
+    renderComposerState();
     return;
   }
   c.innerHTML = msgs.map((m, i) => {
@@ -1061,8 +1150,8 @@ function renderMessages() {
     </div>`;
   }).join('');
   c.scrollTop = c.scrollHeight;
-  document.getElementById('btn-summarize').style.display =
-    sessions.some(s => s.messages.length > 0) ? 'block' : 'none';
+  renderSummarizeAction();
+  renderComposerState();
 }
 
 function selectMsg(i) {
@@ -1223,6 +1312,7 @@ async function send() {
   const msgs = currentMsgs();
   msgs.push({ role: 'user', content: text });
   box.value = '';
+  composerMenuOpen = false;
   selectedMsgIdx = -1;
   setChatRequestPending(true);
   renderMessages();
@@ -1268,8 +1358,7 @@ function toggleVoice() {
 
   recognition.onstart = () => {
     isRecording = true;
-    document.getElementById('btn-mic').classList.add('recording');
-    document.getElementById('btn-mic').textContent = '⏹️';
+    composerMenuOpen = false;
     setVoiceStatusOverride('正在听…说完会自动停止，也可以再点一次结束。', 'info');
     showToast('正在听…说完会自动停止', 10000);
   };
@@ -1280,6 +1369,7 @@ function toggleVoice() {
     box.value = box.value ? box.value + ' ' + text : text;
     box.focus();
     box.setSelectionRange(box.value.length, box.value.length);
+    renderComposerState();
     setVoiceStatusOverride('已识别到语音内容，可以继续编辑后发送。', 'success');
   };
 
@@ -1292,8 +1382,6 @@ function toggleVoice() {
 
   recognition.onend = () => {
     isRecording = false;
-    document.getElementById('btn-mic').classList.remove('recording');
-    document.getElementById('btn-mic').textContent = '🎙️';
     document.getElementById('toast').classList.remove('show');
     if (voiceStatusOverride?.preserveOnEnd) {
       renderVoiceStatus();
@@ -1306,8 +1394,6 @@ function toggleVoice() {
     recognition.start();
   } catch (error) {
     isRecording = false;
-    document.getElementById('btn-mic').classList.remove('recording');
-    document.getElementById('btn-mic').textContent = '🎙️';
     setVoiceStatusOverride('语音输入暂时无法启动，请稍后再试。', 'warn', { preserveOnEnd: true });
     showToast('语音输入暂时无法启动，请稍后再试。');
   }
@@ -1392,6 +1478,7 @@ async function checkAutoSummarize() {
 function renderRecords() {
   const records = normalizeRecords(readJSON('records', []));
   const c = document.getElementById('records-list');
+  renderSummarizeAction();
   if (!records.length) { c.innerHTML = '<div class="empty" style="margin-top:3rem">还没有记录，先去聊聊吧</div>'; return; }
   c.innerHTML = records.map(r => {
     const isEditing = recordEditingDate === r.date;
