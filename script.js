@@ -80,6 +80,9 @@ let sessions = [];
 let currentIdx = 0;
 let selectedMsgIdx = -1;
 let isChatRequestPending = false;
+let voiceStatusOverride = null;
+let recognition = null;
+let isRecording = false;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function readJSON(key, fallback) {
@@ -194,6 +197,7 @@ function loadSettings() {
   document.getElementById('anthropic-key').value = localStorage.getItem('anthropic-key') || '';
   document.getElementById('auto-toggle').checked = localStorage.getItem('auto-summarize') === 'on';
   onProviderChange();
+  renderAutoSummarizeStatus();
 }
 
 function onProviderChange() {
@@ -209,10 +213,12 @@ function saveSettings() {
   const tip = document.getElementById('save-tip');
   tip.style.display = 'inline';
   setTimeout(() => tip.style.display = 'none', 2000);
+  renderAutoSummarizeStatus();
 }
 
 function saveAutoSetting() {
   localStorage.setItem('auto-summarize', document.getElementById('auto-toggle').checked ? 'on' : 'off');
+  renderAutoSummarizeStatus();
 }
 
 function getConfig() {
@@ -225,6 +231,138 @@ function getConfig() {
 
 function hasKey() { return !!getConfig().key; }
 
+function renderStatusNote(id, info) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!info?.message || info.visible === false) {
+    el.textContent = '';
+    el.className = 'status-note';
+    el.style.display = 'none';
+    return;
+  }
+  el.textContent = info.message;
+  el.className = `status-note status-${info.tone || 'muted'}`;
+  el.style.display = 'block';
+}
+
+function getAutoSummarizeStatus() {
+  if (localStorage.getItem('auto-summarize') !== 'on') {
+    return { tone: 'muted', message: '当前已关闭，不会自动整理前一天的聊天。' };
+  }
+  if (!hasKey()) {
+    return { tone: 'warn', message: '已开启，但还没有 API Key，所以不会自动整理。' };
+  }
+
+  const yk = getYesterdayKey();
+  const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
+  const hasYesterdayChats = ySessions.some(session => session.messages.length > 0);
+  const records = normalizeRecords(readJSON('records', []));
+  const alreadySummarized = records.some(record => record.date === yk);
+
+  if (new Date().getHours() < 4) {
+    return { tone: 'info', message: '已开启。每天凌晨 4 点后首次打开 App 时，会检查前一天的聊天。' };
+  }
+  if (!hasYesterdayChats) {
+    return { tone: 'muted', message: '已开启，但昨天没有可整理的聊天。' };
+  }
+  if (alreadySummarized) {
+    return { tone: 'success', message: '已开启，昨天的聊天已经整理过了。' };
+  }
+  return { tone: 'info', message: '条件已满足；自动整理只会在打开 App 时检查。请重新打开页面触发。' };
+}
+
+function renderAutoSummarizeStatus(overrideInfo = null) {
+  renderStatusNote('auto-status', overrideInfo || getAutoSummarizeStatus());
+}
+
+function getSpeechRecognitionCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function isVoiceSecureContext() {
+  return location.protocol === 'https:' ||
+    location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+}
+
+function getDefaultVoiceStatus() {
+  if (!getSpeechRecognitionCtor()) {
+    return {
+      available: false,
+      tone: 'warn',
+      message: '当前浏览器不支持语音输入，推荐使用 Chrome 或 Safari。',
+      visible: true
+    };
+  }
+  if (!isVoiceSecureContext()) {
+    return {
+      available: false,
+      tone: 'warn',
+      message: '当前页面不是安全环境，语音输入通常需要 HTTPS 或 localhost。',
+      visible: true
+    };
+  }
+  return {
+    available: true,
+    tone: 'info',
+    message: '语音输入可用：点麦克风开始说话，再点一次可停止。',
+    visible: false
+  };
+}
+
+function getCurrentVoiceStatus() {
+  const base = getDefaultVoiceStatus();
+  if (!voiceStatusOverride) return base;
+  return { ...base, ...voiceStatusOverride, visible: true };
+}
+
+function renderVoiceStatus() {
+  const status = getCurrentVoiceStatus();
+  const btn = document.getElementById('btn-mic');
+  if (btn) {
+    const disabled = !status.available && !isRecording;
+    btn.disabled = disabled;
+    btn.classList.toggle('disabled', disabled);
+    btn.title = status.message || '语音输入';
+  }
+  renderStatusNote('voice-status', status);
+}
+
+function setVoiceStatusOverride(message, tone = 'info', options = {}) {
+  voiceStatusOverride = {
+    message,
+    tone,
+    available: options.available ?? getDefaultVoiceStatus().available,
+    preserveOnEnd: options.preserveOnEnd ?? false
+  };
+  renderVoiceStatus();
+}
+
+function clearVoiceStatusOverride() {
+  voiceStatusOverride = null;
+  renderVoiceStatus();
+}
+
+function getVoiceErrorMessage(error) {
+  switch (error) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return '麦克风权限未开启，请允许浏览器访问麦克风后再试。';
+    case 'audio-capture':
+      return '没有检测到可用麦克风，请检查设备或系统权限。';
+    case 'network':
+      return '语音识别网络异常，请稍后再试。';
+    case 'no-speech':
+      return '没有听到明显语音，可以再试一次。';
+    case 'language-not-supported':
+      return '当前浏览器不支持中文语音识别。';
+    case 'aborted':
+      return '语音输入已取消。';
+    default:
+      return '语音识别出错：' + error;
+  }
+}
+
 // ── 启动 ──────────────────────────────────────────────────────────────────────
 
 migrateAllOldChats();
@@ -233,6 +371,8 @@ loadSettings();
 renderMessages();
 renderSessionNav();
 renderRecords();
+renderAutoSummarizeStatus();
+renderVoiceStatus();
 checkAutoSummarize();
 
 // ── Tab 切换 ──────────────────────────────────────────────────────────────────
@@ -244,7 +384,10 @@ function switchTab(tab) {
   });
   if (tab === 'chat')     document.getElementById('api-warning').style.display = hasKey() ? 'none' : '';
   if (tab === 'records')  renderRecords();
-  if (tab === 'settings') renderMemoryPreview();
+  if (tab === 'settings') {
+    renderMemoryPreview();
+    renderAutoSummarizeStatus();
+  }
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -474,13 +617,12 @@ async function send() {
 
 // ── 语音输入 ──────────────────────────────────────────────────────────────────
 
-let recognition = null;
-let isRecording = false;
-
 function toggleVoice() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    showToast('当前浏览器不支持语音输入，推荐用 Chrome 或 Safari');
+  const SpeechRecognition = getSpeechRecognitionCtor();
+  const voiceStatus = getDefaultVoiceStatus();
+  if (!SpeechRecognition || !voiceStatus.available) {
+    renderVoiceStatus();
+    showToast(voiceStatus.message);
     return;
   }
 
@@ -498,6 +640,7 @@ function toggleVoice() {
     isRecording = true;
     document.getElementById('btn-mic').classList.add('recording');
     document.getElementById('btn-mic').textContent = '⏹️';
+    setVoiceStatusOverride('正在听…说完会自动停止，也可以再点一次结束。', 'info');
     showToast('正在听…说完会自动停止', 10000);
   };
 
@@ -507,14 +650,14 @@ function toggleVoice() {
     box.value = box.value ? box.value + ' ' + text : text;
     box.focus();
     box.setSelectionRange(box.value.length, box.value.length);
+    setVoiceStatusOverride('已识别到语音内容，可以继续编辑后发送。', 'success');
   };
 
   recognition.onerror = (event) => {
-    if (event.error === 'not-allowed') {
-      showToast('请允许浏览器使用麦克风');
-    } else if (event.error !== 'no-speech') {
-      showToast('识别出错：' + event.error);
-    }
+    const message = getVoiceErrorMessage(event.error);
+    const tone = event.error === 'no-speech' || event.error === 'aborted' ? 'muted' : 'warn';
+    setVoiceStatusOverride(message, tone, { preserveOnEnd: true });
+    if (event.error !== 'aborted') showToast(message);
   };
 
   recognition.onend = () => {
@@ -522,9 +665,22 @@ function toggleVoice() {
     document.getElementById('btn-mic').classList.remove('recording');
     document.getElementById('btn-mic').textContent = '🎙️';
     document.getElementById('toast').classList.remove('show');
+    if (voiceStatusOverride?.preserveOnEnd) {
+      renderVoiceStatus();
+    } else {
+      clearVoiceStatusOverride();
+    }
   };
 
-  recognition.start();
+  try {
+    recognition.start();
+  } catch (error) {
+    isRecording = false;
+    document.getElementById('btn-mic').classList.remove('recording');
+    document.getElementById('btn-mic').textContent = '🎙️';
+    setVoiceStatusOverride('语音输入暂时无法启动，请稍后再试。', 'warn', { preserveOnEnd: true });
+    showToast('语音输入暂时无法启动，请稍后再试。');
+  }
 }
 
 // ── 整理逻辑 ──────────────────────────────────────────────────────────────────
@@ -582,11 +738,14 @@ async function checkAutoSummarize() {
   if (!ySessions.some(s => s.messages && s.messages.length > 0)) return;
   const records = normalizeRecords(readJSON('records', []));
   if (records.some(r => r.date === yk)) return;
+  renderAutoSummarizeStatus({ tone: 'info', message: '正在自动整理昨天的记录…' });
   showToast('正在整理昨日记录…', 60000);
   try {
     await summarizeDate(yk, ySessions);
+    renderAutoSummarizeStatus({ tone: 'success', message: '昨天记录已自动整理完成。' });
     showToast('昨日记录已整理好 ✓');
   } catch(e) {
+    renderAutoSummarizeStatus({ tone: 'error', message: '自动整理失败了，稍后仍可以手动整理。' });
     showToast('自动整理失败，可手动整理');
   }
 }
@@ -658,5 +817,6 @@ function clearAll() {
   sessions = [{ id: Date.now(), messages: [] }];
   currentIdx = 0; saveSessions();
   renderMessages(); renderSessionNav(); renderRecords();
+  renderAutoSummarizeStatus();
   alert('已清除');
 }

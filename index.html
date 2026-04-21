@@ -32,6 +32,7 @@
         <button class="btn-mic" id="btn-mic" onclick="toggleVoice()" title="语音输入">🎙️</button>
         <button class="btn" id="btn-send" onclick="send()" style="align-self:stretch">发送</button>
       </div>
+      <div class="status-note" id="voice-status" aria-live="polite"></div>
       <button class="btn btn-wide" id="btn-summarize" onclick="summarize()" style="display:none">整理今日记录</button>
     </div>
   </div>
@@ -82,6 +83,7 @@
             </label>
             <span class="toggle-label">开启后，凌晨4点后首次打开 App 时，<br>自动将前一天的聊天整理成日记</span>
           </div>
+          <div class="status-note" id="auto-status" aria-live="polite"></div>
         </div>
       </div>
 
