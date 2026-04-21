@@ -2,26 +2,39 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>灵感记录</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f7f5f0; color: #2c2c2a; min-height: 100vh; }
-  .container { max-width: 680px; margin: 0 auto; padding: 2rem 1.25rem; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
+
+  /* 整体布局：撑满视口高度，不让页面滚动 */
+  html, body { height: 100%; overflow: hidden; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f7f5f0; color: #2c2c2a; }
+
+  /* 外层容器：flex 列，撑满屏幕 */
+  .app { max-width: 680px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; }
+
+  /* 顶部 header：固定高度 */
+  .header { flex-shrink: 0; display: flex; justify-content: space-between; align-items: flex-start; padding: 1.25rem 1.25rem 0.75rem; background: #f7f5f0; }
   .header h1 { font-size: 18px; font-weight: 500; color: #2c2c2a; }
   .header .date { font-size: 12px; color: #888780; margin-top: 3px; }
   .tabs { display: flex; gap: 6px; }
   .tab { font-size: 13px; padding: 5px 13px; border-radius: 8px; border: 1px solid #d3d1c7; background: transparent; color: #5f5e5a; cursor: pointer; font-family: inherit; transition: background 0.15s; }
   .tab.active { background: #fff; color: #2c2c2a; }
 
-  .session-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  /* 各 panel 共用：flex 列，填满剩余高度 */
+  .panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0 1.25rem; }
+
+  /* ── 聊天 panel ── */
+  .warning { flex-shrink: 0; background: #faeeda; border: 1px solid #fac775; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #633806; margin-bottom: 8px; display: none; }
+  .session-nav { flex-shrink: 0; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .nav-btn { font-size: 13px; padding: 4px 10px; border-radius: 7px; border: 1px solid #d3d1c7; background: transparent; color: #5f5e5a; cursor: pointer; font-family: inherit; transition: background 0.15s; white-space: nowrap; }
   .nav-btn:hover:not(:disabled) { background: #f0ede6; }
   .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
   .nav-label { font-size: 13px; color: #888780; flex: 1; text-align: center; }
 
-  .messages { min-height: 320px; margin-bottom: 1rem; }
+  /* 消息列表：flex:1 撑满，可滚动 */
+  .messages { flex: 1; overflow-y: auto; padding-bottom: 8px; }
   .empty { text-align: center; padding: 5rem 0; color: #b4b2a9; font-size: 14px; }
   .bubble-wrap { display: flex; margin-bottom: 10px; }
   .bubble-wrap.user { justify-content: flex-end; }
@@ -29,16 +42,39 @@
   .bubble { max-width: 78%; padding: 9px 13px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
   .bubble.user { background: #e6f1fb; color: #185fa5; border-radius: 12px 12px 3px 12px; border: 1px solid #b5d4f4; }
   .bubble.assistant { background: #fff; color: #2c2c2a; border-radius: 12px 12px 12px 3px; border: 1px solid #e8e6e0; }
-  .input-area { display: flex; gap: 8px; margin-bottom: 10px; }
+
+  /* 底部输入区：固定在底部 */
+  .chat-bottom { flex-shrink: 0; padding: 8px 0 max(12px, env(safe-area-inset-bottom)); background: #f7f5f0; }
+  .input-area { display: flex; gap: 8px; margin-bottom: 8px; }
   textarea { flex: 1; resize: none; font-size: 14px; padding: 9px 12px; border-radius: 8px; border: 1px solid #d3d1c7; background: #fff; color: #2c2c2a; line-height: 1.6; outline: none; font-family: inherit; }
   textarea:focus { border-color: #b4b2a9; }
   .btn { font-size: 14px; padding: 0 16px; border-radius: 8px; border: 1px solid #d3d1c7; background: transparent; color: #2c2c2a; cursor: pointer; font-family: inherit; transition: background 0.15s; }
   .btn:hover:not(:disabled) { background: #f0ede6; }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-wide { width: 100%; padding: 9px; font-size: 13px; color: #888780; }
-  .record-card { margin-bottom: 14px; padding: 1rem 1.25rem; background: #fff; border: 1px solid #e8e6e0; border-radius: 12px; }
+
+  /* ── 记录 panel ── */
+  .records-scroll { flex: 1; overflow-y: auto; padding-bottom: 1.5rem; }
+  .record-card { margin-bottom: 14px; background: #fff; border: 1px solid #e8e6e0; border-radius: 12px; overflow: hidden; }
+  .record-main { padding: 1rem 1.25rem; }
   .record-date { font-size: 12px; color: #b4b2a9; font-weight: 500; margin-bottom: 10px; }
   .record-content { font-size: 14px; line-height: 1.8; color: #2c2c2a; white-space: pre-wrap; }
+
+  /* 查看原始对话 */
+  .toggle-history { width: 100%; padding: 9px 1.25rem; font-size: 12px; color: #b4b2a9; background: #faf9f7; border: none; border-top: 1px solid #f0ede6; cursor: pointer; text-align: left; font-family: inherit; transition: background 0.15s; }
+  .toggle-history:hover { background: #f0ede6; color: #888780; }
+  .raw-chat { display: none; padding: 12px 1.25rem 1rem; background: #faf9f7; border-top: 1px solid #f0ede6; }
+  .raw-chat.open { display: block; }
+  .raw-bubble-wrap { display: flex; margin-bottom: 8px; }
+  .raw-bubble-wrap.user { justify-content: flex-end; }
+  .raw-bubble-wrap.assistant { justify-content: flex-start; }
+  .raw-bubble { max-width: 82%; padding: 7px 11px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .raw-bubble.user { background: #e6f1fb; color: #185fa5; border-radius: 10px 10px 3px 10px; border: 1px solid #b5d4f4; }
+  .raw-bubble.assistant { background: #fff; color: #5f5e5a; border-radius: 10px 10px 10px 3px; border: 1px solid #e8e6e0; }
+  .raw-topic-label { font-size: 11px; color: #c4c2b9; margin: 10px 0 6px; }
+
+  /* ── 设置 panel ── */
+  .settings-scroll { flex: 1; overflow-y: auto; padding-bottom: 1.5rem; }
   .settings-box { background: #fff; border: 1px solid #e8e6e0; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
   .settings-box h3 { font-size: 12px; font-weight: 500; color: #b4b2a9; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
   .field { margin-bottom: 10px; }
@@ -47,7 +83,6 @@
   .field input[type="password"], .field select { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid #d3d1c7; font-size: 13px; font-family: inherit; outline: none; background: #f7f5f0; color: #2c2c2a; }
   .field input:focus, .field select:focus { border-color: #b4b2a9; background: #fff; }
   .hint { font-size: 11px; color: #b4b2a9; margin-top: 4px; }
-  .warning { background: #faeeda; border: 1px solid #fac775; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #633806; margin-bottom: 1rem; display: none; }
   .memory-preview { font-size: 13px; color: #5f5e5a; line-height: 1.75; background: #f7f5f0; border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; min-height: 60px; }
   .memory-empty { color: #b4b2a9; font-style: italic; }
 
@@ -67,7 +102,9 @@
 </style>
 </head>
 <body>
-<div class="container">
+<div class="app">
+
+  <!-- 顶部 header -->
   <div class="header">
     <div>
       <h1>灵感记录</h1>
@@ -80,81 +117,91 @@
     </div>
   </div>
 
-  <div id="panel-chat">
+  <!-- 聊天 panel -->
+  <div class="panel" id="panel-chat">
     <div class="warning" id="api-warning">请先在「设置」里填入 API Key，然后选择使用 DeepSeek 或 Claude</div>
     <div class="session-nav" id="session-nav"></div>
     <div class="messages" id="messages"></div>
-    <div class="input-area">
-      <textarea id="input-box" placeholder="随便说点什么..." rows="2" onkeydown="handleKey(event)"></textarea>
-      <button class="btn" id="btn-send" onclick="send()" style="align-self:stretch">发送</button>
+    <div class="chat-bottom">
+      <div class="input-area">
+        <textarea id="input-box" placeholder="随便说点什么..." rows="2" onkeydown="handleKey(event)"></textarea>
+        <button class="btn" id="btn-send" onclick="send()" style="align-self:stretch">发送</button>
+      </div>
+      <button class="btn btn-wide" id="btn-summarize" onclick="summarize()" style="display:none">整理今日记录</button>
     </div>
-    <button class="btn btn-wide" id="btn-summarize" onclick="summarize()" style="display:none">整理今日记录</button>
   </div>
 
-  <div id="panel-records" style="display:none">
-    <div id="records-list"><div class="empty">还没有记录，先去聊聊吧</div></div>
+  <!-- 记录 panel -->
+  <div class="panel" id="panel-records" style="display:none">
+    <div class="records-scroll" id="records-list">
+      <div class="empty">还没有记录，先去聊聊吧</div>
+    </div>
   </div>
 
-  <div id="panel-settings" style="display:none">
-    <div class="settings-box">
-      <h3>API 配置</h3>
-      <div class="field">
-        <label>使用哪个 AI</label>
-        <select id="provider-select" onchange="onProviderChange()">
-          <option value="deepseek">DeepSeek</option>
-          <option value="anthropic">Anthropic (Claude)</option>
-        </select>
+  <!-- 设置 panel -->
+  <div class="panel" id="panel-settings" style="display:none">
+    <div class="settings-scroll">
+      <div class="settings-box">
+        <h3>API 配置</h3>
+        <div class="field">
+          <label>使用哪个 AI</label>
+          <select id="provider-select" onchange="onProviderChange()">
+            <option value="deepseek">DeepSeek</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+          </select>
+        </div>
+        <div class="field" id="field-deepseek">
+          <label>DeepSeek API Key</label>
+          <input type="password" id="deepseek-key" placeholder="sk-..." />
+          <div class="hint">在 platform.deepseek.com → API Keys 获取</div>
+        </div>
+        <div class="field" id="field-anthropic" style="display:none">
+          <label>Anthropic API Key</label>
+          <input type="password" id="anthropic-key" placeholder="sk-ant-..." />
+          <div class="hint">在 console.anthropic.com → API Keys 获取</div>
+        </div>
+        <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+          <button class="btn" onclick="saveSettings()" style="padding:7px 18px;font-size:13px">保存设置</button>
+          <span id="save-tip" style="font-size:12px;color:#0f6e56;display:none">✓ 已保存</span>
+        </div>
       </div>
-      <div class="field" id="field-deepseek">
-        <label>DeepSeek API Key</label>
-        <input type="password" id="deepseek-key" placeholder="sk-..." />
-        <div class="hint">在 platform.deepseek.com → API Keys 获取</div>
-      </div>
-      <div class="field" id="field-anthropic" style="display:none">
-        <label>Anthropic API Key</label>
-        <input type="password" id="anthropic-key" placeholder="sk-ant-..." />
-        <div class="hint">在 console.anthropic.com → API Keys 获取</div>
-      </div>
-      <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
-        <button class="btn" onclick="saveSettings()" style="padding:7px 18px;font-size:13px">保存设置</button>
-        <span id="save-tip" style="font-size:12px;color:#0f6e56;display:none">✓ 已保存</span>
-      </div>
-    </div>
 
-    <div class="settings-box">
-      <h3>自动整理</h3>
-      <div class="field">
-        <label>自动整理前一天的记录</label>
-        <div class="toggle-row">
-          <label class="toggle-wrap">
-            <input type="checkbox" id="auto-toggle" onchange="saveAutoSetting()">
-            <span class="toggle-track"></span>
-          </label>
-          <span class="toggle-label">开启后，凌晨4点后首次打开 App 时，<br>自动将前一天的聊天整理成日记</span>
+      <div class="settings-box">
+        <h3>自动整理</h3>
+        <div class="field">
+          <label>自动整理前一天的记录</label>
+          <div class="toggle-row">
+            <label class="toggle-wrap">
+              <input type="checkbox" id="auto-toggle" onchange="saveAutoSetting()">
+              <span class="toggle-track"></span>
+            </label>
+            <span class="toggle-label">开启后，凌晨4点后首次打开 App 时，<br>自动将前一天的聊天整理成日记</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-box">
+        <h3>AI 的记忆</h3>
+        <div class="field">
+          <label>AI 目前对你的了解（每次整理记录后自动更新）</label>
+          <div class="memory-preview" id="memory-preview"></div>
+        </div>
+        <div style="margin-top:10px">
+          <button class="btn" onclick="clearMemory()" style="font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除记忆</button>
+        </div>
+      </div>
+
+      <div class="settings-box">
+        <h3>数据管理</h3>
+        <div class="field">
+          <label>清除所有聊天记录、整理内容和记忆</label>
+          <button class="btn" onclick="clearAll()" style="margin-top:6px;font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除全部数据</button>
         </div>
       </div>
     </div>
-
-    <div class="settings-box">
-      <h3>AI 的记忆</h3>
-      <div class="field">
-        <label>AI 目前对你的了解（每次整理记录后自动更新）</label>
-        <div class="memory-preview" id="memory-preview"></div>
-      </div>
-      <div style="margin-top:10px">
-        <button class="btn" onclick="clearMemory()" style="font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除记忆</button>
-      </div>
-    </div>
-
-    <div class="settings-box">
-      <h3>数据管理</h3>
-      <div class="field">
-        <label>清除所有聊天记录、整理内容和记忆</label>
-        <button class="btn" onclick="clearAll()" style="margin-top:6px;font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除全部数据</button>
-      </div>
-    </div>
   </div>
-</div>
+
+</div><!-- .app -->
 
 <div class="toast" id="toast"></div>
 
@@ -192,19 +239,27 @@ let sessions = [];
 let currentIdx = 0;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
+// ── 迁移：把所有旧格式 chat-日期 迁移为 sessions-日期 ──────────────────────────
+
+function migrateAllOldChats() {
+  const oldKeys = Object.keys(localStorage).filter(k => k.startsWith('chat-'));
+  oldKeys.forEach(oldKey => {
+    const dateKey = oldKey.replace('chat-', '');
+    const newKey = 'sessions-' + dateKey;
+    if (!localStorage.getItem(newKey)) {
+      const msgs = JSON.parse(localStorage.getItem(oldKey) || '[]');
+      if (msgs.length) {
+        localStorage.setItem(newKey, JSON.stringify([{ id: Date.now(), messages: msgs }]));
+      }
+    }
+    localStorage.removeItem(oldKey);
+  });
+}
+
 // ── 话题 / 存储 ───────────────────────────────────────────────────────────────
 
 function loadTodaySessions() {
-  const oldKey = 'chat-' + todayKey;
-  const newKey = 'sessions-' + todayKey;
-  if (localStorage.getItem(oldKey) && !localStorage.getItem(newKey)) {
-    const msgs = JSON.parse(localStorage.getItem(oldKey) || '[]');
-    if (msgs.length) {
-      sessions = [{ id: Date.now(), messages: msgs }];
-      saveSessions(); localStorage.removeItem(oldKey); return;
-    }
-  }
-  const saved = localStorage.getItem(newKey);
+  const saved = localStorage.getItem('sessions-' + todayKey);
   sessions = saved ? JSON.parse(saved) : [];
   if (!sessions.length) sessions = [{ id: Date.now(), messages: [] }];
   currentIdx = sessions.length - 1;
@@ -289,6 +344,7 @@ function hasKey() { return !!getConfig().key; }
 
 // ── 启动 ──────────────────────────────────────────────────────────────────────
 
+migrateAllOldChats();   // 先迁移所有历史旧数据
 loadTodaySessions();
 loadSettings();
 renderMessages();
@@ -404,23 +460,20 @@ async function send() {
   document.getElementById('btn-send').disabled = false;
 }
 
-// ── 核心整理逻辑（手动 + 自动共用）──────────────────────────────────────────
+// ── 整理逻辑（手动 + 自动共用）──────────────────────────────────────────────
 
 async function summarizeDate(dateKey, dateSessions) {
   const active = dateSessions.filter(s => s.messages && s.messages.length > 0);
   if (!active.length) return;
-
   let conv = '';
   active.forEach((s, i) => {
     if (active.length > 1) conv += `【话题 ${i + 1}】\n`;
     conv += s.messages.map(m => (m.role === 'user' ? '我' : '助手') + '：' + m.content).join('\n');
     conv += '\n\n';
   });
-
   const dateLabel = new Date(dateKey + 'T12:00:00')
     .toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
 
-  // 第一步：生成记录
   const content = await callAI(
     [{ role: 'user', content: SUMMARY_PROMPT + '\n\n对话：\n' + conv }], null
   );
@@ -429,7 +482,6 @@ async function summarizeDate(dateKey, dateSessions) {
   records.sort((a, b) => b.date.localeCompare(a.date));
   localStorage.setItem('records', JSON.stringify(records));
 
-  // 第二步：更新记忆
   const existingMem = localStorage.getItem('user-memory') || '（暂无）';
   const newMem = await callAI(
     [{ role: 'user', content: MEMORY_PROMPT + '\n\n已有记忆：\n' + existingMem + '\n\n今天的对话：\n' + conv }], null
@@ -437,7 +489,6 @@ async function summarizeDate(dateKey, dateSessions) {
   localStorage.setItem('user-memory', newMem);
 }
 
-// 手动整理按钮
 async function summarize() {
   if (!sessions.some(s => s.messages.length > 0)) return;
   const btn = document.getElementById('btn-summarize');
@@ -449,21 +500,17 @@ async function summarize() {
   btn.disabled = false; btn.textContent = '整理今日记录';
 }
 
-// ── 自动整理：启动时检查 ──────────────────────────────────────────────────────
+// ── 自动整理 ──────────────────────────────────────────────────────────────────
 
 async function checkAutoSummarize() {
-  if (localStorage.getItem('auto-summarize') !== 'on') return;  // 功能未开启
-  if (!hasKey()) return;                                          // 没有 API Key
-  if (new Date().getHours() < 4) return;                         // 凌晨4点前不整理
-
+  if (localStorage.getItem('auto-summarize') !== 'on') return;
+  if (!hasKey()) return;
+  if (new Date().getHours() < 4) return;
   const yk = getYesterdayKey();
   const ySessions = JSON.parse(localStorage.getItem('sessions-' + yk) || '[]');
-  if (!ySessions.some(s => s.messages && s.messages.length > 0)) return; // 昨天没内容
-
+  if (!ySessions.some(s => s.messages && s.messages.length > 0)) return;
   const records = JSON.parse(localStorage.getItem('records') || '[]');
-  if (records.some(r => r.date === yk)) return; // 昨天已经整理过了
-
-  // 三个条件全满足，开始自动整理
+  if (records.some(r => r.date === yk)) return;
   showToast('正在整理昨日记录…', 60000);
   try {
     await summarizeDate(yk, ySessions);
@@ -478,10 +525,42 @@ async function checkAutoSummarize() {
 function renderRecords() {
   const records = JSON.parse(localStorage.getItem('records') || '[]');
   const c = document.getElementById('records-list');
-  if (!records.length) { c.innerHTML = '<div class="empty">还没有记录，先去聊聊吧</div>'; return; }
-  c.innerHTML = records.map(r =>
-    `<div class="record-card"><div class="record-date">${r.label}</div><div class="record-content">${esc(r.content)}</div></div>`
-  ).join('');
+  if (!records.length) { c.innerHTML = '<div class="empty" style="margin-top:3rem">还没有记录，先去聊聊吧</div>'; return; }
+  c.innerHTML = records.map(r => {
+    // 读取该天的原始对话
+    const rawSessions = JSON.parse(localStorage.getItem('sessions-' + r.date) || '[]');
+    const activeSessions = rawSessions.filter(s => s.messages && s.messages.length > 0);
+    const hasRaw = activeSessions.length > 0;
+
+    let rawHtml = '';
+    if (hasRaw) {
+      activeSessions.forEach((s, si) => {
+        if (activeSessions.length > 1) {
+          rawHtml += `<div class="raw-topic-label">话题 ${si + 1}</div>`;
+        }
+        rawHtml += s.messages.map(m =>
+          `<div class="raw-bubble-wrap ${m.role}"><div class="raw-bubble ${m.role}">${esc(m.content)}</div></div>`
+        ).join('');
+      });
+    }
+
+    return `<div class="record-card">
+      <div class="record-main">
+        <div class="record-date">${r.label}</div>
+        <div class="record-content">${esc(r.content)}</div>
+      </div>
+      ${hasRaw ? `
+        <button class="toggle-history" onclick="toggleRaw(this)">查看原始对话 ▾</button>
+        <div class="raw-chat">${rawHtml}</div>
+      ` : ''}
+    </div>`;
+  }).join('');
+}
+
+function toggleRaw(btn) {
+  const rawDiv = btn.nextElementSibling;
+  const open = rawDiv.classList.toggle('open');
+  btn.textContent = open ? '收起对话 ▴' : '查看原始对话 ▾';
 }
 
 // ── 记忆 ──────────────────────────────────────────────────────────────────────
