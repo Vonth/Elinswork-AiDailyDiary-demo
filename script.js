@@ -71,6 +71,9 @@ const TITLE_PROMPT = `请根据这段对话，生成一个适合作为聊天话�
 3. 标题要自然，像人给一段聊天起的小标题。
 4. 不要出现“话题”“聊天”“对话”“记录”这些词。`;
 
+const RECORD_STYLE_PROMPT = `如果提供了“历史文风参考”，你只参考文字的语气、节奏、措辞和文字质感。
+不要复用里面的具体事实、人物、项目、情绪、日期或事件，更不要把旧记录里的内容写进今天。`;
+
 // ── 状态 ──────────────────────────────────────────────────────────────────────
 
 function getLocalDateKey(date = new Date()) {
@@ -95,6 +98,8 @@ const THEME_STORAGE_KEY = 'theme';
 let sessionTitlePendingId = null;
 let sessionTitleEditingId = null;
 let sessionTitleDraft = '';
+let recordEditingDate = null;
+let recordEditDraft = '';
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function readJSON(key, fallback) {
@@ -132,12 +137,20 @@ function normalizeSessions(value) {
 
 function normalizeRecords(value) {
   if (!Array.isArray(value)) return [];
-  return value.filter(record =>
-    record &&
-    typeof record.date === 'string' &&
-    typeof record.label === 'string' &&
-    typeof record.content === 'string'
-  );
+  return value
+    .filter(record =>
+      record &&
+      typeof record.date === 'string' &&
+      typeof record.label === 'string' &&
+      typeof record.content === 'string'
+    )
+    .map(record => ({
+      date: record.date,
+      label: record.label,
+      content: record.content,
+      edited: record.edited === true,
+      updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : null
+    }));
 }
 
 function createSession(messages = []) {
@@ -191,6 +204,28 @@ function canAutoNameSession(session) {
 function clearAutoTitleIfNeeded(session) {
   if (!session || session.titleMode === 'manual') return;
   if (!session.messages.length) session.title = '';
+}
+
+function getRecordByDate(records, dateKey) {
+  return records.find(record => record.date === dateKey) || null;
+}
+
+function getRecordStyleReferenceText(dateKey, records) {
+  const history = records.filter(record => record.date !== dateKey && record.content.trim());
+  if (!history.length) return '';
+
+  const prioritized = [
+    ...history.filter(record => record.edited),
+    ...history.filter(record => !record.edited)
+  ].slice(0, 3);
+
+  if (!prioritized.length) return '';
+
+  const samples = prioritized.map((record, index) =>
+    `示例 ${index + 1}（${record.label}${record.edited ? '，用户改过' : ''}）\n${record.content}`
+  ).join('\n\n');
+
+  return `\n\n【历史文风参考】\n${RECORD_STYLE_PROMPT}\n\n${samples}`;
 }
 
 function escapeAttr(value) {
@@ -982,11 +1017,18 @@ async function summarizeDate(dateKey, dateSessions) {
   const dateLabel = new Date(dateKey + 'T12:00:00')
     .toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
 
-  const content = await callAI(
-    [{ role: 'user', content: SUMMARY_PROMPT + '\n\n对话：\n' + conv }], null
-  );
   let records = normalizeRecords(readJSON('records', []));
-  records = [{ date: dateKey, label: dateLabel, content }, ...records.filter(r => r.date !== dateKey)];
+  const styleReference = getRecordStyleReferenceText(dateKey, records);
+  const content = await callAI(
+    [{ role: 'user', content: SUMMARY_PROMPT + styleReference + '\n\n对话：\n' + conv }], null
+  );
+  records = [{
+    date: dateKey,
+    label: dateLabel,
+    content,
+    edited: false,
+    updatedAt: null
+  }, ...records.filter(r => r.date !== dateKey)];
   records.sort((a, b) => b.date.localeCompare(a.date));
   localStorage.setItem('records', JSON.stringify(records));
 
@@ -1042,6 +1084,7 @@ function renderRecords() {
   const c = document.getElementById('records-list');
   if (!records.length) { c.innerHTML = '<div class="empty" style="margin-top:3rem">还没有记录，先去聊聊吧</div>'; return; }
   c.innerHTML = records.map(r => {
+    const isEditing = recordEditingDate === r.date;
     const rawSessions = normalizeSessions(readJSON('sessions-' + r.date, []));
     const activeSessions = rawSessions.filter(s => s.messages && s.messages.length > 0);
     const hasRaw = activeSessions.length > 0;
@@ -1060,8 +1103,35 @@ function renderRecords() {
 
     return `<div class="record-card">
       <div class="record-main">
-        <div class="record-date">${r.label}</div>
-        <div class="record-content">${esc(r.content)}</div>
+        <div class="record-head">
+          <div class="record-date">${r.label}</div>
+          <div class="record-tools">
+            ${r.edited ? '<span class="record-badge">已修改</span>' : ''}
+            ${isEditing
+              ? ''
+              : `<button class="record-link-btn" onclick="startEditRecord('${r.date}')">编辑</button>`}
+          </div>
+        </div>
+        ${isEditing ? `
+          <div class="record-edit-area">
+            <textarea
+              id="record-editor"
+              class="record-editor"
+              rows="7"
+              oninput="updateRecordEditDraft(this.value)"
+              onkeydown="handleRecordEditorKey(event)"
+            >${escapeAttr(recordEditDraft)}</textarea>
+            <div class="record-edit-footer">
+              <span class="record-edit-hint">Ctrl / Cmd + Enter 保存，Esc 取消</span>
+              <div class="record-edit-actions">
+                <button class="action-btn" onclick="saveEditingRecord()">保存</button>
+                <button class="action-btn" onclick="cancelEditingRecord()">取消</button>
+              </div>
+            </div>
+          </div>
+        ` : `
+          <div class="record-content">${esc(r.content)}</div>
+        `}
       </div>
       ${hasRaw ? `
         <button class="toggle-history" onclick="toggleRaw(this)">查看原始对话 ▾</button>
@@ -1069,12 +1139,78 @@ function renderRecords() {
       ` : ''}
     </div>`;
   }).join('');
+
+  if (recordEditingDate) {
+    setTimeout(() => {
+      const editor = document.getElementById('record-editor');
+      if (!editor) return;
+      editor.focus();
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+    }, 0);
+  }
 }
 
 function toggleRaw(btn) {
   const rawDiv = btn.nextElementSibling;
   const open = rawDiv.classList.toggle('open');
   btn.textContent = open ? '收起对话 ▴' : '查看原始对话 ▾';
+}
+
+function startEditRecord(dateKey) {
+  const records = normalizeRecords(readJSON('records', []));
+  const record = getRecordByDate(records, dateKey);
+  if (!record) return;
+  recordEditingDate = dateKey;
+  recordEditDraft = record.content;
+  renderRecords();
+}
+
+function updateRecordEditDraft(value) {
+  recordEditDraft = value;
+}
+
+function handleRecordEditorKey(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    cancelEditingRecord();
+    return;
+  }
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    saveEditingRecord();
+  }
+}
+
+function cancelEditingRecord(silent = false) {
+  if (recordEditingDate == null) return;
+  recordEditingDate = null;
+  recordEditDraft = '';
+  if (!silent) renderRecords();
+}
+
+function saveEditingRecord() {
+  if (!recordEditingDate) return;
+  const nextContent = recordEditDraft.trim();
+  if (!nextContent) {
+    showToast('记录内容不能为空');
+    return;
+  }
+
+  const records = normalizeRecords(readJSON('records', []));
+  const record = getRecordByDate(records, recordEditingDate);
+  if (!record) {
+    cancelEditingRecord();
+    return;
+  }
+
+  record.content = nextContent;
+  record.edited = true;
+  record.updatedAt = Date.now();
+  localStorage.setItem('records', JSON.stringify(records));
+  recordEditingDate = null;
+  recordEditDraft = '';
+  renderRecords();
+  showToast('已保存记录修改');
 }
 
 // ── 记忆 ──────────────────────────────────────────────────────────────────────
@@ -1099,6 +1235,8 @@ function clearAll() {
   Object.keys(localStorage)
     .filter(k => k.startsWith('chat-') || k.startsWith('sessions-') || k === 'records' || k === 'user-memory')
     .forEach(k => localStorage.removeItem(k));
+  recordEditingDate = null;
+  recordEditDraft = '';
   sessions = [createSession()];
   currentIdx = 0; saveSessions();
   renderMessages(); renderSessionNav(); renderRecords();
