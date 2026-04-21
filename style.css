@@ -15,11 +15,16 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0 1.25rem; }
 
 .warning { flex-shrink: 0; background: #faeeda; border: 1px solid #fac775; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #633806; margin-bottom: 8px; display: none; }
-.session-nav { flex-shrink: 0; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.session-nav { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.session-nav-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-nav-actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .nav-btn { font-size: 13px; padding: 4px 10px; border-radius: 7px; border: 1px solid #d3d1c7; background: transparent; color: #5f5e5a; cursor: pointer; font-family: inherit; transition: background 0.15s; white-space: nowrap; }
 .nav-btn:hover:not(:disabled) { background: #f0ede6; }
 .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.nav-label { font-size: 13px; color: #888780; flex: 1; text-align: center; }
+.nav-btn-light { font-size: 12px; padding: 4px 9px; }
+.nav-label { flex: 1; min-width: 0; text-align: center; }
+.nav-title { font-size: 13px; color: #5f5e5a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-meta { font-size: 11px; color: #b4b2a9; margin-top: 2px; }
 
 .messages { flex: 1; overflow-y: auto; padding-bottom: 8px; }
 .empty { text-align: center; padding: 5rem 0; color: #b4b2a9; font-size: 14px; }
@@ -172,6 +177,8 @@ body,
 .chat-bottom,
 .tab,
 .nav-btn,
+.nav-title,
+.nav-meta,
 .action-btn,
 .btn,
 .btn-mic,
@@ -205,7 +212,7 @@ textarea,
 :root[data-theme='dark'] .memory-preview { color: #ece7dc; }
 
 :root[data-theme='dark'] .header .date,
-:root[data-theme='dark'] .nav-label,
+:root[data-theme='dark'] .nav-meta,
 :root[data-theme='dark'] .record-date,
 :root[data-theme='dark'] .raw-topic-label,
 :root[data-theme='dark'] .hint,
@@ -279,6 +286,7 @@ textarea,
 :root[data-theme='dark'] .field select:focus { border-color: #8c877d; background: #30312c; }
 
 :root[data-theme='dark'] .warning { background: #46351f; border-color: #9a6c2c; color: #f3dcaf; }
+:root[data-theme='dark'] .nav-title { color: #ece7dc; }
 :root[data-theme='dark'] .status-note.status-muted { color: #c6c0b5; }
 :root[data-theme='dark'] .status-note.status-info { background: #213448; color: #d7ebfd; border-color: #40617f; }
 :root[data-theme='dark'] .status-note.status-success { background: #20382c; color: #d4eeda; border-color: #416a50; }
