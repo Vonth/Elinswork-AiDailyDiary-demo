@@ -87,6 +87,8 @@ const todayKey = getLocalDateKey();
 document.getElementById('today-label').textContent =
   new Date().toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
 
+const EXPORT_APP_ID = 'elinswork-ai-daily-diary';
+const EXPORT_VERSION = 1;
 let sessions = [];
 let currentIdx = 0;
 let selectedMsgIdx = -1;
@@ -101,6 +103,15 @@ let sessionTitleDraft = '';
 let recordEditingDate = null;
 let recordEditDraft = '';
 function currentMsgs() { return sessions[currentIdx].messages; }
+
+function formatDateLabel(dateKey) {
+  return new Date(dateKey + 'T12:00:00')
+    .toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
+}
+
+function isValidDateKey(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
 
 function readJSON(key, fallback) {
   const raw = localStorage.getItem(key);
@@ -244,6 +255,295 @@ function escapeAttr(value) {
     .replace(/'/g, '&#39;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function listDiaryStorageKeys() {
+  return Object.keys(localStorage)
+    .filter(key => key.startsWith('chat-') || key.startsWith('sessions-') || key === 'records' || key === 'user-memory');
+}
+
+function clearStoredDiaryData() {
+  listDiaryStorageKeys().forEach(key => localStorage.removeItem(key));
+}
+
+function resetTransientUiState() {
+  selectedMsgIdx = -1;
+  sessionTitlePendingId = null;
+  sessionTitleEditingId = null;
+  sessionTitleDraft = '';
+  recordEditingDate = null;
+  recordEditDraft = '';
+}
+
+function collectStoredSessionsByDate() {
+  return Object.keys(localStorage)
+    .filter(key => key.startsWith('sessions-'))
+    .sort()
+    .reduce((result, storageKey) => {
+      const dateKey = storageKey.slice('sessions-'.length);
+      if (!isValidDateKey(dateKey)) return result;
+      result[dateKey] = normalizeSessions(readJSON(storageKey, []));
+      return result;
+    }, {});
+}
+
+function sortRecordsByDate(records) {
+  records.sort((a, b) => b.date.localeCompare(a.date));
+  return records;
+}
+
+function createExportPayload(type, data, extra = {}) {
+  return {
+    app: EXPORT_APP_ID,
+    version: EXPORT_VERSION,
+    type,
+    exportedAt: new Date().toISOString(),
+    ...extra,
+    data
+  };
+}
+
+function downloadJSON(filename, payload) {
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function syncDataManagementDateInput(dateKey = todayKey) {
+  const input = document.getElementById('data-date-input');
+  if (!input) return;
+  input.value = isValidDateKey(dateKey) ? dateKey : todayKey;
+}
+
+function getSelectedDataManagementDate() {
+  const input = document.getElementById('data-date-input');
+  const value = input?.value || todayKey;
+  if (isValidDateKey(value)) return value;
+  syncDataManagementDateInput(todayKey);
+  return todayKey;
+}
+
+function getFullDataSnapshot() {
+  return createExportPayload('full', {
+    sessionsByDate: collectStoredSessionsByDate(),
+    records: sortRecordsByDate(normalizeRecords(readJSON('records', []))),
+    userMemory: localStorage.getItem('user-memory') || ''
+  });
+}
+
+function getDayDataSnapshot(dateKey) {
+  const records = normalizeRecords(readJSON('records', []));
+  return createExportPayload('day', {
+    sessions: normalizeSessions(readJSON('sessions-' + dateKey, [])),
+    record: getRecordByDate(records, dateKey)
+  }, {
+    date: dateKey
+  });
+}
+
+function exportAllData() {
+  const payload = getFullDataSnapshot();
+  downloadJSON(`AiDailyDiary-backup-${todayKey}.json`, payload);
+  showToast('已导出全部数据');
+}
+
+function exportDayData() {
+  const dateKey = getSelectedDataManagementDate();
+  const payload = getDayDataSnapshot(dateKey);
+  const hasChats = payload.data.sessions.some(session => session.messages.length > 0);
+  if (!hasChats && !payload.data.record) {
+    showToast('这一天还没有可导出的聊天或记录');
+    return;
+  }
+  downloadJSON(`AiDailyDiary-${dateKey}.json`, payload);
+  showToast('已导出这一天的数据');
+}
+
+function openImportAllDialog() {
+  if (isChatRequestPending) {
+    showToast('请先等待当前回复完成');
+    return;
+  }
+  const input = document.getElementById('import-all-input');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function openImportDayDialog() {
+  if (isChatRequestPending) {
+    showToast('请先等待当前回复完成');
+    return;
+  }
+  const input = document.getElementById('import-day-input');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function ensureImportEnvelope(payload, expectedType) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('文件内容不是有效的 JSON 备份');
+  }
+  if (payload.app !== EXPORT_APP_ID) {
+    throw new Error('这不是这个网页导出的备份文件');
+  }
+  if (payload.version !== EXPORT_VERSION) {
+    throw new Error(`暂不支持版本 ${payload.version} 的备份文件`);
+  }
+  if (payload.type !== expectedType) {
+    throw new Error(expectedType === 'full' ? '请选择“导出全部”生成的备份文件' : '请选择“导出某天”生成的备份文件');
+  }
+  if (!payload.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
+    throw new Error('备份文件缺少可导入的数据');
+  }
+  return payload;
+}
+
+function normalizeImportedFullData(payload) {
+  const source = ensureImportEnvelope(payload, 'full').data;
+  const sessionsSource = source.sessionsByDate;
+  if (sessionsSource != null && (typeof sessionsSource !== 'object' || Array.isArray(sessionsSource))) {
+    throw new Error('整体备份里的聊天数据格式不对');
+  }
+
+  const sessionsByDate = {};
+  Object.entries(sessionsSource || {}).forEach(([dateKey, daySessions]) => {
+    if (!isValidDateKey(dateKey)) return;
+    sessionsByDate[dateKey] = normalizeSessions(daySessions);
+  });
+
+  const records = sortRecordsByDate(normalizeRecords(Array.isArray(source.records) ? source.records : []));
+  const userMemory = typeof source.userMemory === 'string' ? source.userMemory : '';
+  return { sessionsByDate, records, userMemory };
+}
+
+function normalizeImportedDayData(payload) {
+  ensureImportEnvelope(payload, 'day');
+  if (!isValidDateKey(payload.date)) {
+    throw new Error('按天备份里缺少有效日期');
+  }
+
+  const sessions = normalizeSessions(payload.data.sessions);
+  const rawRecord = payload.data.record;
+  let record = null;
+  if (rawRecord != null) {
+    const normalized = normalizeRecords([{
+      ...rawRecord,
+      date: payload.date,
+      label: typeof rawRecord.label === 'string' && rawRecord.label.trim()
+        ? rawRecord.label
+        : formatDateLabel(payload.date)
+    }]);
+    if (!normalized.length) throw new Error('按天备份里的记录格式不对');
+    record = normalized[0];
+  }
+
+  return { dateKey: payload.date, sessions, record };
+}
+
+async function readImportPayloadFromFile(file) {
+  try {
+    return JSON.parse(await file.text());
+  } catch (error) {
+    throw new Error('文件内容不是合法的 JSON');
+  }
+}
+
+function refreshAppAfterImport({ reloadToday = false } = {}) {
+  resetTransientUiState();
+  if (reloadToday) {
+    loadTodaySessions();
+  }
+  renderMessages();
+  renderSessionNav();
+  renderRecords();
+  renderMemoryPreview();
+  renderAutoSummarizeStatus();
+  maybeAutoNameSession(sessions[currentIdx]?.id);
+}
+
+function applyFullImport(imported) {
+  clearStoredDiaryData();
+  Object.entries(imported.sessionsByDate).forEach(([dateKey, daySessions]) => {
+    localStorage.setItem('sessions-' + dateKey, JSON.stringify(daySessions));
+  });
+  localStorage.setItem('records', JSON.stringify(imported.records));
+  if (imported.userMemory.trim()) {
+    localStorage.setItem('user-memory', imported.userMemory);
+  } else {
+    localStorage.removeItem('user-memory');
+  }
+  refreshAppAfterImport({ reloadToday: true });
+}
+
+function applyDayImport(imported) {
+  const storageKey = 'sessions-' + imported.dateKey;
+  if (imported.sessions.length) {
+    localStorage.setItem(storageKey, JSON.stringify(imported.sessions));
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+
+  const records = normalizeRecords(readJSON('records', []))
+    .filter(record => record.date !== imported.dateKey);
+  if (imported.record) records.unshift(imported.record);
+  localStorage.setItem('records', JSON.stringify(sortRecordsByDate(records)));
+  refreshAppAfterImport({ reloadToday: imported.dateKey === todayKey });
+}
+
+async function handleImportAllFile(event) {
+  const input = event.target;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  try {
+    const imported = normalizeImportedFullData(await readImportPayloadFromFile(file));
+    const dayCount = Object.keys(imported.sessionsByDate).length;
+    const recordCount = imported.records.length;
+    const confirmText =
+      `确定导入这个整体备份吗？\n\n` +
+      `当前全部聊天、灵感记录和 AI 记忆会被覆盖。\n` +
+      `备份里有 ${dayCount} 天聊天、${recordCount} 条记录。`;
+    if (!confirm(confirmText)) return;
+    applyFullImport(imported);
+    showToast('已导入全部数据');
+  } catch (error) {
+    alert('导入失败：' + error.message);
+  } finally {
+    input.value = '';
+  }
+}
+
+async function handleImportDayFile(event) {
+  const input = event.target;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  try {
+    const imported = normalizeImportedDayData(await readImportPayloadFromFile(file));
+    const activeSessionCount = imported.sessions.filter(session => session.messages.length > 0).length;
+    const confirmText =
+      `确定导入 ${formatDateLabel(imported.dateKey)} 这一天的数据吗？\n\n` +
+      `本地这一天的聊天和灵感记录会被覆盖。\n` +
+      `备份里有 ${activeSessionCount} 个有内容的话题，` +
+      `${imported.record ? '并且包含 1 条灵感记录。' : '但不包含灵感记录。'}`;
+    if (!confirm(confirmText)) return;
+    applyDayImport(imported);
+    syncDataManagementDateInput(imported.dateKey);
+    showToast('已导入这一天的数据');
+  } catch (error) {
+    alert('导入失败：' + error.message);
+  } finally {
+    input.value = '';
+  }
 }
 
 // ── 迁移 ──────────────────────────────────────────────────────────────────────
@@ -481,6 +781,7 @@ function loadSettings() {
   loadThemeSetting();
   onProviderChange();
   renderAutoSummarizeStatus();
+  syncDataManagementDateInput();
 }
 
 function getThemeSetting() {
@@ -1023,8 +1324,7 @@ async function summarizeDate(dateKey, dateSessions) {
     conv += s.messages.map(m => (m.role === 'user' ? '我' : '助手') + '：' + m.content).join('\n');
     conv += '\n\n';
   });
-  const dateLabel = new Date(dateKey + 'T12:00:00')
-    .toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
+  const dateLabel = formatDateLabel(dateKey);
 
   let records = normalizeRecords(readJSON('records', []));
   const styleReference = getRecordStyleReferenceText(dateKey, records);
@@ -1265,14 +1565,12 @@ function clearMemory() {
 
 function clearAll() {
   if (!confirm('确定清除所有聊天、记录和 AI 记忆吗？')) return;
-  Object.keys(localStorage)
-    .filter(k => k.startsWith('chat-') || k.startsWith('sessions-') || k === 'records' || k === 'user-memory')
-    .forEach(k => localStorage.removeItem(k));
-  recordEditingDate = null;
-  recordEditDraft = '';
+  clearStoredDiaryData();
+  resetTransientUiState();
   sessions = [createSession()];
   currentIdx = 0; saveSessions();
   renderMessages(); renderSessionNav(); renderRecords();
+  renderMemoryPreview();
   renderAutoSummarizeStatus();
   alert('已清除');
 }

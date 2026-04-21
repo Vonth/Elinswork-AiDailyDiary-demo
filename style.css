@@ -136,9 +136,19 @@ textarea:focus { border-color: #b4b2a9; }
 .field { margin-bottom: 10px; }
 .field:last-child { margin-bottom: 0; }
 .field label { font-size: 13px; color: #5f5e5a; display: block; margin-bottom: 5px; }
-.field input[type="password"], .field select { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid #d3d1c7; font-size: 13px; font-family: inherit; outline: none; background: #f7f5f0; color: #2c2c2a; }
+.field input[type="password"], .field input[type="date"], .field select { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid #d3d1c7; font-size: 13px; font-family: inherit; outline: none; background: #f7f5f0; color: #2c2c2a; }
 .field input:focus, .field select:focus { border-color: #b4b2a9; background: #fff; }
 .hint { font-size: 11px; color: #b4b2a9; margin-top: 4px; }
+.data-date-row { display: flex; flex-direction: column; gap: 8px; }
+.data-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.data-actions .btn { width: auto; }
+@media (min-width: 720px) {
+  .data-date-row { flex-direction: row; align-items: center; }
+  .data-date-row input[type="date"] { max-width: 220px; }
+}
+@media (max-width: 719px) {
+  .data-actions .btn { flex: 1 1 calc(50% - 4px); }
+}
 .status-note {
   display: none;
   margin-top: 10px;
@@ -205,6 +215,7 @@ body,
 .btn-mic,
 textarea,
 .field input[type="password"],
+.field input[type="date"],
 .field select,
 .record-card,
 .settings-box,
@@ -229,6 +240,7 @@ textarea,
 :root[data-theme='dark'] .nav-btn,
 :root[data-theme='dark'] .btn-mic,
 :root[data-theme='dark'] .field input[type="password"],
+:root[data-theme='dark'] .field input[type="date"],
 :root[data-theme='dark'] .field select,
 :root[data-theme='dark'] .memory-preview { color: #ece7dc; }
 
@@ -255,6 +267,7 @@ textarea,
 :root[data-theme='dark'] .nav-title-input,
 :root[data-theme='dark'] textarea,
 :root[data-theme='dark'] .field input[type="password"],
+:root[data-theme='dark'] .field input[type="date"],
 :root[data-theme='dark'] .field select,
 :root[data-theme='dark'] .record-card,
 :root[data-theme='dark'] .settings-box,
@@ -277,6 +290,7 @@ textarea,
 :root[data-theme='dark'] .nav-title-input,
 :root[data-theme='dark'] textarea,
 :root[data-theme='dark'] .field input[type="password"],
+:root[data-theme='dark'] .field input[type="date"],
 :root[data-theme='dark'] .field select,
 :root[data-theme='dark'] .memory-preview { background: #2a2b27; }
 

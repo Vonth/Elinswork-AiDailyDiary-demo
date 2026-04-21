@@ -122,9 +122,30 @@
       <div class="settings-box">
         <h3>数据管理</h3>
         <div class="field">
+          <label>整体导出或导入全部聊天记录、灵感记录和 AI 记忆</label>
+          <div class="data-actions">
+            <button class="btn" onclick="exportAllData()">导出全部</button>
+            <button class="btn" onclick="openImportAllDialog()">导入全部</button>
+          </div>
+          <div class="hint">整体导入会覆盖当前全部聊天、记录和 AI 记忆，不会改动 API Key、主题和自动整理设置。</div>
+        </div>
+        <div class="field">
+          <label for="data-date-input">按某一天导出或导入聊天记录和灵感记录</label>
+          <div class="data-date-row">
+            <input type="date" id="data-date-input">
+            <div class="data-actions">
+              <button class="btn" onclick="exportDayData()">导出某天</button>
+              <button class="btn" onclick="openImportDayDialog()">导入某天</button>
+            </div>
+          </div>
+          <div class="hint">按天导入会使用文件里的日期，覆盖那一天的聊天和记录。</div>
+        </div>
+        <div class="field">
           <label>清除所有聊天记录、整理内容和记忆</label>
           <button class="btn" onclick="clearAll()" style="margin-top:6px;font-size:13px;padding:6px 14px;color:#a32d2d;border-color:#f09595">清除全部数据</button>
         </div>
+        <input type="file" id="import-all-input" accept=".json,application/json" onchange="handleImportAllFile(event)" hidden>
+        <input type="file" id="import-day-input" accept=".json,application/json" onchange="handleImportDayFile(event)" hidden>
       </div>
     </div>
   </div>
