@@ -23,8 +23,12 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .nav-btn-light { font-size: 12px; padding: 4px 9px; }
 .nav-label { flex: 1; min-width: 0; text-align: center; }
+.nav-label.editing { text-align: left; }
 .nav-title { font-size: 13px; color: #5f5e5a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-meta { font-size: 11px; color: #b4b2a9; margin-top: 2px; }
+.nav-title-input { width: 100%; font-size: 13px; padding: 6px 9px; border-radius: 7px; border: 1px solid #d3d1c7; background: #fff; color: #2c2c2a; font-family: inherit; outline: none; }
+.nav-title-input:focus { border-color: #b4b2a9; }
+.nav-edit-hint { font-size: 11px; color: #b4b2a9; margin-top: 4px; }
 
 .messages { flex: 1; overflow-y: auto; padding-bottom: 8px; }
 .empty { text-align: center; padding: 5rem 0; color: #b4b2a9; font-size: 14px; }
@@ -179,6 +183,8 @@ body,
 .nav-btn,
 .nav-title,
 .nav-meta,
+.nav-title-input,
+.nav-edit-hint,
 .action-btn,
 .btn,
 .btn-mic,
@@ -213,6 +219,7 @@ textarea,
 
 :root[data-theme='dark'] .header .date,
 :root[data-theme='dark'] .nav-meta,
+:root[data-theme='dark'] .nav-edit-hint,
 :root[data-theme='dark'] .record-date,
 :root[data-theme='dark'] .raw-topic-label,
 :root[data-theme='dark'] .hint,
@@ -228,6 +235,7 @@ textarea,
 :root[data-theme='dark'] .action-btn,
 :root[data-theme='dark'] .btn,
 :root[data-theme='dark'] .btn-mic,
+:root[data-theme='dark'] .nav-title-input,
 :root[data-theme='dark'] textarea,
 :root[data-theme='dark'] .field input[type="password"],
 :root[data-theme='dark'] .field select,
@@ -248,6 +256,7 @@ textarea,
 :root[data-theme='dark'] .record-card,
 :root[data-theme='dark'] .settings-box,
 :root[data-theme='dark'] .bubble.assistant,
+:root[data-theme='dark'] .nav-title-input,
 :root[data-theme='dark'] textarea,
 :root[data-theme='dark'] .field input[type="password"],
 :root[data-theme='dark'] .field select,
@@ -287,6 +296,8 @@ textarea,
 
 :root[data-theme='dark'] .warning { background: #46351f; border-color: #9a6c2c; color: #f3dcaf; }
 :root[data-theme='dark'] .nav-title { color: #ece7dc; }
+:root[data-theme='dark'] .nav-title-input { color: #ece7dc; border-color: #474842; }
+:root[data-theme='dark'] .nav-title-input:focus { border-color: #8c877d; background: #30312c; }
 :root[data-theme='dark'] .status-note.status-muted { color: #c6c0b5; }
 :root[data-theme='dark'] .status-note.status-info { background: #213448; color: #d7ebfd; border-color: #40617f; }
 :root[data-theme='dark'] .status-note.status-success { background: #20382c; color: #d4eeda; border-color: #416a50; }

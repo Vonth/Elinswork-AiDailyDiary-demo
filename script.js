@@ -93,6 +93,8 @@ let recognition = null;
 let isRecording = false;
 const THEME_STORAGE_KEY = 'theme';
 let sessionTitlePendingId = null;
+let sessionTitleEditingId = null;
+let sessionTitleDraft = '';
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function readJSON(key, fallback) {
@@ -191,6 +193,15 @@ function clearAutoTitleIfNeeded(session) {
   if (!session.messages.length) session.title = '';
 }
 
+function escapeAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 // ── 迁移 ──────────────────────────────────────────────────────────────────────
 
 function migrateAllOldChats() {
@@ -238,47 +249,111 @@ function renderSessionNav() {
   const current = sessions[i];
   const canAiRename = !isChatRequestPending && canAutoNameSession(current) && hasKey();
   const isTitlePending = current?.id === sessionTitlePendingId;
+  const isEditingTitle = current?.id === sessionTitleEditingId;
   document.getElementById('session-nav').innerHTML =
     `<div class="session-nav-main">
         <button class="nav-btn" onclick="gotoSession(${i-1})" ${i===0?'disabled':''}>←</button>
-        <div class="nav-label">
-          <div class="nav-title">${esc(getSessionDisplayTitle(current, i))}</div>
-          <div class="nav-meta">${esc(getSessionMetaLabel(current, i, total))}</div>
+        <div class="nav-label ${isEditingTitle ? 'editing' : ''}">
+          ${isEditingTitle ? `
+            <input
+              id="session-title-input"
+              class="nav-title-input"
+              type="text"
+              value="${escapeAttr(sessionTitleDraft)}"
+              maxlength="12"
+              placeholder="给这个话题起个名字"
+              oninput="updateSessionTitleDraft(this.value)"
+              onkeydown="handleSessionTitleInputKey(event)"
+            >
+            <div class="nav-edit-hint">留空后保存，会恢复自动命名</div>
+          ` : `
+            <div class="nav-title">${esc(getSessionDisplayTitle(current, i))}</div>
+            <div class="nav-meta">${esc(getSessionMetaLabel(current, i, total))}</div>
+          `}
         </div>
         <button class="nav-btn" onclick="gotoSession(${i+1})" ${i===total-1?'disabled':''}>→</button>
       </div>
       <div class="session-nav-actions">
-        <button class="nav-btn nav-btn-light" onclick="renameCurrentSession()">改名</button>
-        <button class="nav-btn nav-btn-light" onclick="requestCurrentSessionTitle(true)" ${(canAiRename && !isTitlePending) ? '' : 'disabled'}>
-          ${isTitlePending ? '命名中…' : 'AI 命名'}
-        </button>
+        ${isEditingTitle ? `
+          <button class="nav-btn nav-btn-light" onclick="saveCurrentSessionTitle()">保存</button>
+          <button class="nav-btn nav-btn-light" onclick="cancelRenameCurrentSession()">取消</button>
+        ` : `
+          <button class="nav-btn nav-btn-light" onclick="startRenameCurrentSession()">改名</button>
+          <button class="nav-btn nav-btn-light" onclick="requestCurrentSessionTitle(true)" ${(canAiRename && !isTitlePending) ? '' : 'disabled'}>
+            ${isTitlePending ? '命名中…' : 'AI 命名'}
+          </button>
+        `}
         <button class="nav-btn" onclick="newSession()">＋ 新话题</button>
       </div>`;
+
+  if (isEditingTitle) {
+    setTimeout(() => {
+      const input = document.getElementById('session-title-input');
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
+  }
 }
 
 function gotoSession(i) {
   if (i < 0 || i >= sessions.length) return;
+  cancelRenameCurrentSession(true);
   currentIdx = i; selectedMsgIdx = -1; renderMessages(); renderSessionNav();
   maybeAutoNameSession(sessions[i]?.id);
 }
 
 function newSession() {
+  cancelRenameCurrentSession(true);
   sessions.push(createSession());
   saveSessions(); currentIdx = sessions.length - 1; selectedMsgIdx = -1;
   renderMessages(); renderSessionNav();
   document.getElementById('input-box').focus();
 }
 
-function renameCurrentSession() {
+function startRenameCurrentSession() {
   const session = sessions[currentIdx];
   if (!session) return;
-  const nextTitle = prompt('给这个话题起个名字（留空则恢复 AI 自动命名）', session.title || '');
-  if (nextTitle == null) return;
+  sessionTitleEditingId = session.id;
+  sessionTitleDraft = session.title || '';
+  renderSessionNav();
+}
 
-  const cleaned = cleanSessionTitle(nextTitle);
+function updateSessionTitleDraft(value) {
+  sessionTitleDraft = value;
+}
+
+function handleSessionTitleInputKey(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveCurrentSessionTitle();
+    return;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    cancelRenameCurrentSession();
+  }
+}
+
+function cancelRenameCurrentSession(silent = false) {
+  if (sessionTitleEditingId == null) return;
+  sessionTitleEditingId = null;
+  sessionTitleDraft = '';
+  if (!silent) renderSessionNav();
+}
+
+function saveCurrentSessionTitle() {
+  const session = getSessionById(sessionTitleEditingId);
+  if (!session) {
+    cancelRenameCurrentSession();
+    return;
+  }
+  const cleaned = cleanSessionTitle(sessionTitleDraft);
   if (!cleaned) {
     session.title = '';
     session.titleMode = 'auto';
+    sessionTitleEditingId = null;
+    sessionTitleDraft = '';
     saveSessions();
     renderSessionNav();
     showToast('已恢复自动命名');
@@ -288,6 +363,8 @@ function renameCurrentSession() {
 
   session.title = cleaned;
   session.titleMode = 'manual';
+  sessionTitleEditingId = null;
+  sessionTitleDraft = '';
   saveSessions();
   renderSessionNav();
   showToast('已保存话题名称');
@@ -304,6 +381,7 @@ function maybeAutoNameSession(sessionId) {
   if (!session) return;
   if (session.titleMode === 'manual' || session.title) return;
   if (sessionTitlePendingId === sessionId) return;
+  if (sessionTitleEditingId === sessionId) return;
   if (isChatRequestPending || !hasKey() || !canAutoNameSession(session)) return;
   requestSessionTitleById(sessionId, { forceRename: false, silent: true });
 }
