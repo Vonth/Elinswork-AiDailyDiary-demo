@@ -224,11 +224,11 @@
 <script>
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
-const CHAT_SYSTEM_BASE = `你是用户的私人ai对话伙伴，陪用户记录想法、梳理问题、审视生活。
+const CHAT_SYSTEM_BASE = `你是用户的私人对话伙伴，陪用户记录想法、梳理问题、审视生活。
 
-你的角色人格底色细腻，理性，中立，善于倾听，不谄媚，尊重自主性，理解不同的观点。你会像一个真正参与TA生活的朋友——不只是倾听，而是真的在思考TA说的事情。当TA分享一个想法时，你会从TA的视角出发去理解，同时也带入自己的判断；当TA遇到问题时，你不急着给建议，而是先帮TA把问题看清楚；当你觉得TA的某个想法值得深挖，或者有什么没想到的角落，你会直接说出来。
+你的角色更像一个真正参与TA生活的朋友——不只是倾听，而是真的在思考TA说的事情。当TA分享一个想法时，你会从TA的视角出发去理解，同时也带入自己的判断；当TA遇到问题时，你不急着给建议，而是先帮TA把问题看清楚；当你觉得TA的某个想法值得深挖，或者有什么没想到的角落，你会直接说出来。
 
-语气自然、直接，不用刻意保持轻松，也不需要每次都表示肯定。不绕弯子，不说废话。回复长度跟着话题走——简单的事简短回，值得聊的事就真的聊进去，不硬性限制句数。用中文。你是 AI，不要假装自己有具体的生活经历。对用户分享的日常可以有真实的好奇和反应，但不要编造"我也……"这类虚假共鸣。`;
+语气自然、直接，不用刻意保持轻松，也不需要每次都表示肯定。不绕弯子，不说废话。回复长度跟着话题走——简单的事简短回，值得聊的事就真的聊进去，不硬性限制句数。用中文。`;
 
 const SUMMARY_PROMPT = `你是用户的私人日记整理者。根据今天的对话，写一篇有温度的今日记录。
 
@@ -247,12 +247,21 @@ const MEMORY_PROMPT = `根据下面的对话内容和已有的用户记忆，更
 
 // ── 状态 ──────────────────────────────────────────────────────────────────────
 
-const todayKey = new Date().toISOString().split('T')[0];
+// 用本地时间算日期，避免 UTC 时区偏差导致日期错误
+function getLocalDateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+const todayKey = getLocalDateKey();
 document.getElementById('today-label').textContent =
   new Date().toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
 
 let sessions = [];
 let currentIdx = 0;
+let selectedMsgIdx = -1;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 // ── 迁移：把所有旧格式 chat-日期 迁移为 sessions-日期 ──────────────────────────
@@ -288,7 +297,7 @@ function saveSessions() {
 
 function getYesterdayKey() {
   const d = new Date(); d.setDate(d.getDate() - 1);
-  return d.toISOString().split('T')[0];
+  return getLocalDateKey(d);
 }
 
 function getChatSystem() {
@@ -400,8 +409,6 @@ function handleKey(e) {
 function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
-
-let selectedMsgIdx = -1;
 
 function renderMessages() {
   const msgs = currentMsgs();
