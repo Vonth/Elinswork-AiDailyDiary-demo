@@ -148,6 +148,7 @@ function normalizeRecords(value) {
       date: record.date,
       label: record.label,
       content: record.content,
+      originalContent: typeof record.originalContent === 'string' ? record.originalContent : record.content,
       edited: record.edited === true,
       updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : null
     }));
@@ -208,6 +209,14 @@ function clearAutoTitleIfNeeded(session) {
 
 function getRecordByDate(records, dateKey) {
   return records.find(record => record.date === dateKey) || null;
+}
+
+function canRestoreRecord(record) {
+  return !!record &&
+    record.edited === true &&
+    typeof record.originalContent === 'string' &&
+    record.originalContent.trim() &&
+    record.originalContent !== record.content;
 }
 
 function getRecordStyleReferenceText(dateKey, records) {
@@ -1026,6 +1035,7 @@ async function summarizeDate(dateKey, dateSessions) {
     date: dateKey,
     label: dateLabel,
     content,
+    originalContent: content,
     edited: false,
     updatedAt: null
   }, ...records.filter(r => r.date !== dateKey)];
@@ -1085,6 +1095,7 @@ function renderRecords() {
   if (!records.length) { c.innerHTML = '<div class="empty" style="margin-top:3rem">还没有记录，先去聊聊吧</div>'; return; }
   c.innerHTML = records.map(r => {
     const isEditing = recordEditingDate === r.date;
+    const canRestore = canRestoreRecord(r);
     const rawSessions = normalizeSessions(readJSON('sessions-' + r.date, []));
     const activeSessions = rawSessions.filter(s => s.messages && s.messages.length > 0);
     const hasRaw = activeSessions.length > 0;
@@ -1107,9 +1118,10 @@ function renderRecords() {
           <div class="record-date">${r.label}</div>
           <div class="record-tools">
             ${r.edited ? '<span class="record-badge">已修改</span>' : ''}
-            ${isEditing
-              ? ''
-              : `<button class="record-link-btn" onclick="startEditRecord('${r.date}')">编辑</button>`}
+            ${isEditing ? '' : `
+              ${canRestore ? `<button class="record-link-btn" onclick="restoreRecordToOriginal('${r.date}')">恢复原稿</button>` : ''}
+              <button class="record-link-btn" onclick="startEditRecord('${r.date}')">编辑</button>
+            `}
           </div>
         </div>
         ${isEditing ? `
@@ -1124,6 +1136,7 @@ function renderRecords() {
             <div class="record-edit-footer">
               <span class="record-edit-hint">Ctrl / Cmd + Enter 保存，Esc 取消</span>
               <div class="record-edit-actions">
+                ${canRestore ? `<button class="action-btn" onclick="restoreRecordToOriginal('${r.date}', true)">恢复 AI 原稿</button>` : ''}
                 <button class="action-btn" onclick="saveEditingRecord()">保存</button>
                 <button class="action-btn" onclick="cancelEditingRecord()">取消</button>
               </div>
@@ -1211,6 +1224,26 @@ function saveEditingRecord() {
   recordEditDraft = '';
   renderRecords();
   showToast('已保存记录修改');
+}
+
+function restoreRecordToOriginal(dateKey, fromEditing = false) {
+  const records = normalizeRecords(readJSON('records', []));
+  const record = getRecordByDate(records, dateKey);
+  if (!canRestoreRecord(record)) return;
+  if (!confirm('确定恢复到 AI 最初整理出来的原稿吗？你后面手动改过的内容会被撤销。')) return;
+
+  record.content = record.originalContent;
+  record.edited = false;
+  record.updatedAt = null;
+  localStorage.setItem('records', JSON.stringify(records));
+
+  if (recordEditingDate === dateKey || fromEditing) {
+    recordEditingDate = null;
+    recordEditDraft = '';
+  }
+
+  renderRecords();
+  showToast('已恢复到 AI 原稿');
 }
 
 // ── 记忆 ──────────────────────────────────────────────────────────────────────
