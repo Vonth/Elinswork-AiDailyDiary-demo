@@ -87,6 +87,7 @@ const todayKey = getLocalDateKey();
 document.getElementById('today-label').textContent =
   new Date().toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
 
+const AI_REQUEST_TIMEOUT_MS = 45000;
 const EXPORT_APP_ID = 'elinswork-ai-daily-diary';
 const EXPORT_VERSION = 1;
 let sessions = [];
@@ -1258,23 +1259,39 @@ function getAnthropicReply(data) {
   return textBlock.text;
 }
 
-async function callAI(msgs, system) {
+async function fetchWithTimeout(url, options, requestLabel, timeoutMs = AI_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`${requestLabel}超时了，请检查网络或稍后再试`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callAI(msgs, system, options = {}) {
+  const { requestLabel = 'AI 请求', timeoutMs = AI_REQUEST_TIMEOUT_MS } = options;
   const { provider, key } = getConfig();
   if (!key) throw new Error('请先在设置里填入 API Key');
   if (provider === 'deepseek') {
     const allMsgs = system ? [{ role:'system', content:system }, ...msgs] : msgs;
-    const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    const res = await fetchWithTimeout('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
       body: JSON.stringify({ model: 'deepseek-chat', messages: allMsgs, max_tokens: 1000 })
-    });
+    }, requestLabel, timeoutMs);
     const d = await readJSONResponse(res, 'DeepSeek');
     if (!res.ok || d.error) {
       throw new Error(getApiErrorMessage(d, `DeepSeek 请求失败（${res.status}）`));
     }
     return getDeepSeekReply(d);
   } else {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1288,7 +1305,7 @@ async function callAI(msgs, system) {
         ...(system ? { system } : {}),
         messages: msgs
       })
-    });
+    }, requestLabel, timeoutMs);
     const d = await readJSONResponse(res, 'Anthropic');
     if (!res.ok || d.error) {
       throw new Error(getApiErrorMessage(d, `Anthropic 请求失败（${res.status}）`));
@@ -1401,7 +1418,11 @@ function toggleVoice() {
 
 // ── 整理逻辑 ──────────────────────────────────────────────────────────────────
 
-async function summarizeDate(dateKey, dateSessions) {
+async function summarizeDate(dateKey, dateSessions, options = {}) {
+  const { onProgress = null, continueOnMemoryError = false } = options;
+  const reportProgress = (step) => {
+    onProgress?.(step);
+  };
   const active = dateSessions.filter(s => s.messages && s.messages.length > 0);
   if (!active.length) return;
   let conv = '';
@@ -1414,8 +1435,10 @@ async function summarizeDate(dateKey, dateSessions) {
 
   let records = normalizeRecords(readJSON('records', []));
   const styleReference = getRecordStyleReferenceText(dateKey, records);
+  reportProgress('record_start');
   const content = await callAI(
-    [{ role: 'user', content: SUMMARY_PROMPT + styleReference + '\n\n对话：\n' + conv }], null
+    [{ role: 'user', content: SUMMARY_PROMPT + styleReference + '\n\n对话：\n' + conv }], null,
+    { requestLabel: '生成记录' }
   );
   records = [{
     date: dateKey,
@@ -1427,12 +1450,25 @@ async function summarizeDate(dateKey, dateSessions) {
   }, ...records.filter(r => r.date !== dateKey)];
   records.sort((a, b) => b.date.localeCompare(a.date));
   localStorage.setItem('records', JSON.stringify(records));
+  renderRecords();
 
+  reportProgress('memory_start');
   const existingMem = localStorage.getItem('user-memory') || '（暂无）';
-  const newMem = await callAI(
-    [{ role: 'user', content: MEMORY_PROMPT + '\n\n已有记忆：\n' + existingMem + '\n\n今天的对话：\n' + conv }], null
-  );
-  localStorage.setItem('user-memory', newMem);
+  try {
+    const newMem = await callAI(
+      [{ role: 'user', content: MEMORY_PROMPT + '\n\n已有记忆：\n' + existingMem + '\n\n今天的对话：\n' + conv }], null,
+      { requestLabel: '更新 AI 记忆' }
+    );
+    localStorage.setItem('user-memory', newMem);
+    renderMemoryPreview();
+    reportProgress('done');
+    return { content, memoryUpdated: true };
+  } catch (error) {
+    console.warn('更新 AI 记忆失败：', error);
+    reportProgress('memory_failed');
+    if (!continueOnMemoryError) throw error;
+    return { content, memoryUpdated: false, memoryError: error };
+  }
 }
 
 async function summarize() {
@@ -1444,8 +1480,14 @@ async function summarize() {
   const btn = document.getElementById('btn-summarize');
   btn.disabled = true; btn.textContent = '整理中…';
   try {
-    await summarizeDate(todayKey, sessions);
+    const result = await summarizeDate(todayKey, sessions, {
+      continueOnMemoryError: true,
+      onProgress: (step) => {
+        btn.textContent = step === 'memory_start' ? '更新记忆中…' : '整理中…';
+      }
+    });
     switchTab('records');
+    showToast(result.memoryUpdated ? '今日记录已整理好 ✓' : '今日记录已生成，AI 记忆更新失败');
   } catch(e) { alert('整理失败：' + e.message); }
   btn.disabled = false; btn.textContent = '整理今日记录';
 }
@@ -1461,15 +1503,34 @@ async function checkAutoSummarize() {
   if (!ySessions.some(s => s.messages && s.messages.length > 0)) return;
   const records = normalizeRecords(readJSON('records', []));
   if (records.some(r => r.date === yk)) return;
-  renderAutoSummarizeStatus({ tone: 'info', message: '正在自动整理昨天的记录…' });
+  renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
   showToast('正在整理昨日记录…', 60000);
   try {
-    await summarizeDate(yk, ySessions);
-    renderAutoSummarizeStatus({ tone: 'success', message: '昨天记录已自动整理完成。' });
-    showToast('昨日记录已整理好 ✓');
+    const result = await summarizeDate(yk, ySessions, {
+      continueOnMemoryError: true,
+      onProgress: (step) => {
+        if (step === 'record_start') {
+          renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
+          return;
+        }
+        if (step === 'memory_start') {
+          renderAutoSummarizeStatus({ tone: 'info', message: '昨天记录已生成，正在更新 AI 记忆…' });
+        }
+      }
+    });
+    if (result.memoryUpdated) {
+      renderAutoSummarizeStatus({ tone: 'success', message: '昨天记录已自动整理完成。' });
+      showToast('昨日记录已整理好 ✓');
+    } else {
+      renderAutoSummarizeStatus({ tone: 'warn', message: '昨天记录已生成，但更新 AI 记忆失败了。' });
+      showToast('昨日记录已生成，AI 记忆更新失败');
+    }
   } catch(e) {
-    renderAutoSummarizeStatus({ tone: 'error', message: '自动整理失败了，稍后仍可以手动整理。' });
-    showToast('自动整理失败，可手动整理');
+    const timeoutMessage = /超时/.test(e.message || '')
+      ? '自动整理超时了，稍后可以重试，或者手动整理。'
+      : '自动整理失败了，稍后仍可以手动整理。';
+    renderAutoSummarizeStatus({ tone: 'error', message: timeoutMessage });
+    showToast(/超时/.test(e.message || '') ? '自动整理超时了，可稍后重试' : '自动整理失败，可手动整理');
   }
 }
 
