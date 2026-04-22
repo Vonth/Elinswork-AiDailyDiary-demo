@@ -1309,8 +1309,12 @@ async function regenMsg(i) {
 
 // ── AI 调用 ───────────────────────────────────────────────────────────────────
 
-async function readJSONResponse(res, providerLabel) {
-  const text = await res.text();
+async function readJSONResponse(res, providerLabel, timeoutMs = AI_REQUEST_TIMEOUT_MS) {
+  const text = await withPromiseTimeout(
+    res.text(),
+    timeoutMs,
+    `${providerLabel}响应读取超时了，请检查网络或稍后再试`
+  );
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -1373,7 +1377,7 @@ async function callAI(msgs, system, options = {}) {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
       body: JSON.stringify({ model: 'deepseek-chat', messages: allMsgs, max_tokens: 1000 })
     }, requestLabel, timeoutMs);
-    const d = await readJSONResponse(res, 'DeepSeek');
+    const d = await readJSONResponse(res, 'DeepSeek', timeoutMs);
     if (!res.ok || d.error) {
       throw new Error(getApiErrorMessage(d, `DeepSeek 请求失败（${res.status}）`));
     }
@@ -1394,7 +1398,7 @@ async function callAI(msgs, system, options = {}) {
         messages: msgs
       })
     }, requestLabel, timeoutMs);
-    const d = await readJSONResponse(res, 'Anthropic');
+    const d = await readJSONResponse(res, 'Anthropic', timeoutMs);
     if (!res.ok || d.error) {
       throw new Error(getApiErrorMessage(d, `Anthropic 请求失败（${res.status}）`));
     }
@@ -1589,7 +1593,7 @@ async function checkAutoSummarize() {
   const yk = getYesterdayKey();
   const existingRun = getAutoSummarizeRunState();
   if (existingRun?.dateKey === yk && existingRun.status === 'running') {
-    // 页面刷新后上一次的异步请求已经终止，直接重试，不管时间多短
+    // 页面刷新后，上一次未完成的请求已经不存在了，直接重试更符合真实状态。
     finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
   }
   const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
@@ -1611,7 +1615,7 @@ async function checkAutoSummarize() {
     finishedAt: null
   });
   renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
-  showToast('正在整理昨日记录…', 60000);
+  showToast('正在整理昨日记录…', 12000);
   try {
     const result = await withPromiseTimeout(
       summarizeDate(yk, ySessions, {
@@ -1639,6 +1643,7 @@ async function checkAutoSummarize() {
               finishedAt: null
             });
             renderAutoSummarizeStatus({ tone: 'info', message: '昨天记录已生成，正在更新 AI 记忆…' });
+            showToast('昨天记录已生成，正在更新 AI 记忆…', 12000);
           }
         }
       }),
