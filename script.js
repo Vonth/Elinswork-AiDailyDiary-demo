@@ -107,6 +107,8 @@ let sessionTitleDraft = '';
 let recordEditingDate = null;
 let recordEditDraft = '';
 let composerMenuOpen = false;
+let isAutoSummarizeInProgress = false;
+let toastTimer = null;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function formatDateLabel(dateKey) {
@@ -1174,6 +1176,9 @@ renderAutoSummarizeStatus();
 renderVoiceStatus();
 document.addEventListener('click', handleDocumentClick);
 document.addEventListener('keydown', handleDocumentKeydown);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkAutoSummarize();
+});
 checkAutoSummarize();
 maybeAutoNameSession(sessions[currentIdx]?.id);
 
@@ -1195,7 +1200,6 @@ function switchTab(tab) {
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
-let toastTimer = null;
 function showToast(msg, duration = 3500) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -1588,10 +1592,7 @@ async function summarize() {
 }
 
 async function summarizeYesterday() {
-  if (isChatRequestPending) {
-    showToast('请先等待当前回复完成');
-    return;
-  }
+  if (isChatRequestPending) { showToast('请先等待当前回复完成'); return; }
   const yk = getYesterdayKey();
   const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
   if (!ySessions.some(s => s.messages.length > 0)) return;
@@ -1613,21 +1614,15 @@ async function summarizeYesterday() {
 // ── 自动整理 ──────────────────────────────────────────────────────────────────
 
 async function checkAutoSummarize() {
+  if (isAutoSummarizeInProgress) return;
   if (localStorage.getItem('auto-summarize') !== 'on') return;
   if (!hasKey()) return;
   if (new Date().getHours() < 4) return;
   const yk = getYesterdayKey();
   const existingRun = getAutoSummarizeRunState();
   if (existingRun?.dateKey === yk && existingRun.status === 'running') {
-    if (isAutoSummarizeRunStateStale(existingRun)) {
-      finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
-    } else {
-      renderAutoSummarizeStatus({
-        tone: existingRun.tone || 'info',
-        message: existingRun.message || '正在自动整理昨天的记录…'
-      });
-      return;
-    }
+    // 页面刷新后上一次请求已终止，直接重试
+    finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
   }
   const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
   if (!ySessions.some(s => s.messages && s.messages.length > 0)) return;
@@ -1639,7 +1634,70 @@ async function checkAutoSummarize() {
     return;
   }
   const runStartedAt = Date.now();
+  isAutoSummarizeInProgress = true;
   persistAutoSummarizeRunState({
+    dateKey: yk,
+    status: 'running',
+    tone: 'info',
+    message: '正在生成昨天的记录…',
+    startedAt: runStartedAt,
+    finishedAt: null
+  });
+  renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
+  showToast('正在整理昨日记录…', 60000);
+  try {
+    const result = await withPromiseTimeout(
+      summarizeDate(yk, ySessions, {
+        continueOnMemoryError: true,
+        onProgress: (step) => {
+          if (step === 'record_start') {
+            persistAutoSummarizeRunState({
+              dateKey: yk,
+              status: 'running',
+              tone: 'info',
+              message: '正在生成昨天的记录…',
+              startedAt: runStartedAt,
+              finishedAt: null
+            });
+            renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
+            return;
+          }
+          if (step === 'memory_start') {
+            persistAutoSummarizeRunState({
+              dateKey: yk,
+              status: 'running',
+              tone: 'info',
+              message: '昨天记录已生成，正在更新 AI 记忆…',
+              startedAt: runStartedAt,
+              finishedAt: null
+            });
+            renderAutoSummarizeStatus({ tone: 'info', message: '昨天记录已生成，正在更新 AI 记忆…' });
+          }
+        }
+      }),
+      AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS,
+      '自动整理超时了，稍后可以重试，或者手动整理。'
+    );
+    if (result.memoryUpdated) {
+      finalizeAutoSummarizeRunState(yk, 'success', '昨天记录已自动整理完成。');
+      renderAutoSummarizeStatus({ tone: 'success', message: '昨天记录已自动整理完成。' });
+      showToast('昨日记录已整理好 ✓');
+    } else {
+      finalizeAutoSummarizeRunState(yk, 'warn', '昨天记录已生成，但更新 AI 记忆失败了。');
+      renderAutoSummarizeStatus({ tone: 'warn', message: '昨天记录已生成，但更新 AI 记忆失败了。' });
+      showToast('昨日记录已生成，AI 记忆更新失败');
+    }
+  } catch(e) {
+    const timeoutMessage = /超时/.test(e.message || '')
+      ? '自动整理超时了，稍后可以重试，或者手动整理。'
+      : '自动整理失败了，稍后仍可以手动整理。';
+    finalizeAutoSummarizeRunState(yk, 'error', timeoutMessage);
+    renderAutoSummarizeStatus({ tone: 'error', message: timeoutMessage });
+    showToast(/超时/.test(e.message || '') ? '自动整理超时了，可稍后重试' : '自动整理失败，可手动整理');
+  } finally {
+    isAutoSummarizeInProgress = false;
+  }
+}
     dateKey: yk,
     status: 'running',
     tone: 'info',
