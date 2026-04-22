@@ -107,6 +107,7 @@ let sessionTitleDraft = '';
 let recordEditingDate = null;
 let recordEditDraft = '';
 let composerMenuOpen = false;
+let isAutoSummarizeInProgress = false;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function formatDateLabel(dateKey) {
@@ -1167,6 +1168,9 @@ renderAutoSummarizeStatus();
 renderVoiceStatus();
 document.addEventListener('click', handleDocumentClick);
 document.addEventListener('keydown', handleDocumentKeydown);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkAutoSummarize();
+});
 checkAutoSummarize();
 maybeAutoNameSession(sessions[currentIdx]?.id);
 
@@ -1309,15 +1313,8 @@ async function regenMsg(i) {
 
 // ── AI 调用 ───────────────────────────────────────────────────────────────────
 
-
-// ── AI 调用 ───────────────────────────────────────────────────────────────────
-
-async function readJSONResponse(res, providerLabel, timeoutMs = AI_REQUEST_TIMEOUT_MS) {
-  const text = await withPromiseTimeout(
-    res.text(),
-    timeoutMs,
-    `${providerLabel}响应读取超时了，请检查网络或稍后再试`
-  );
+async function readJSONResponse(res, providerLabel) {
+  const text = await res.text();
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -1380,7 +1377,7 @@ async function callAI(msgs, system, options = {}) {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
       body: JSON.stringify({ model: 'deepseek-chat', messages: allMsgs, max_tokens: 1000 })
     }, requestLabel, timeoutMs);
-    const d = await readJSONResponse(res, 'DeepSeek', timeoutMs);
+    const d = await readJSONResponse(res, 'DeepSeek');
     if (!res.ok || d.error) {
       throw new Error(getApiErrorMessage(d, `DeepSeek 请求失败（${res.status}）`));
     }
@@ -1401,7 +1398,7 @@ async function callAI(msgs, system, options = {}) {
         messages: msgs
       })
     }, requestLabel, timeoutMs);
-    const d = await readJSONResponse(res, 'Anthropic', timeoutMs);
+    const d = await readJSONResponse(res, 'Anthropic');
     if (!res.ok || d.error) {
       throw new Error(getApiErrorMessage(d, `Anthropic 请求失败（${res.status}）`));
     }
@@ -1590,14 +1587,22 @@ async function summarize() {
 // ── 自动整理 ──────────────────────────────────────────────────────────────────
 
 async function checkAutoSummarize() {
+  if (isAutoSummarizeInProgress) return;
   if (localStorage.getItem('auto-summarize') !== 'on') return;
   if (!hasKey()) return;
   if (new Date().getHours() < 4) return;
   const yk = getYesterdayKey();
   const existingRun = getAutoSummarizeRunState();
   if (existingRun?.dateKey === yk && existingRun.status === 'running') {
-    // 页面刷新后，上一次未完成的请求已经不存在了，直接重试更符合真实状态。
-    finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
+    if (isAutoSummarizeRunStateStale(existingRun)) {
+      finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
+    } else {
+      renderAutoSummarizeStatus({
+        tone: existingRun.tone || 'info',
+        message: existingRun.message || '正在自动整理昨天的记录…'
+      });
+      return;
+    }
   }
   const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
   if (!ySessions.some(s => s.messages && s.messages.length > 0)) return;
@@ -1609,6 +1614,7 @@ async function checkAutoSummarize() {
     return;
   }
   const runStartedAt = Date.now();
+  isAutoSummarizeInProgress = true;
   persistAutoSummarizeRunState({
     dateKey: yk,
     status: 'running',
@@ -1618,7 +1624,7 @@ async function checkAutoSummarize() {
     finishedAt: null
   });
   renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
-  showToast('正在整理昨日记录…', 12000);
+  showToast('正在整理昨日记录…', 60000);
   try {
     const result = await withPromiseTimeout(
       summarizeDate(yk, ySessions, {
@@ -1646,7 +1652,6 @@ async function checkAutoSummarize() {
               finishedAt: null
             });
             renderAutoSummarizeStatus({ tone: 'info', message: '昨天记录已生成，正在更新 AI 记忆…' });
-            showToast('昨天记录已生成，正在更新 AI 记忆…', 12000);
           }
         }
       }),
@@ -1669,6 +1674,8 @@ async function checkAutoSummarize() {
     finalizeAutoSummarizeRunState(yk, 'error', timeoutMessage);
     renderAutoSummarizeStatus({ tone: 'error', message: timeoutMessage });
     showToast(/超时/.test(e.message || '') ? '自动整理超时了，可稍后重试' : '自动整理失败，可手动整理');
+  } finally {
+    isAutoSummarizeInProgress = false;
   }
 }
 
@@ -1703,7 +1710,6 @@ function renderRecords() {
         <div class="record-head">
           <div class="record-date">${r.label}</div>
           <div class="record-tools">
-            ${isEditing ? '' : `<button class="record-link-btn danger" onclick="deleteRecord('${r.date}')">删除</button>`}
             ${r.edited ? '<span class="record-badge">已修改</span>' : ''}
             ${isEditing ? '' : `
               ${canRestore ? `<button class="record-link-btn" onclick="restoreRecordToOriginal('${r.date}')">恢复原稿</button>` : ''}
@@ -1754,29 +1760,6 @@ function toggleRaw(btn) {
   const rawDiv = btn.nextElementSibling;
   const open = rawDiv.classList.toggle('open');
   btn.textContent = open ? '收起对话 ▴' : '查看原始对话 ▾';
-}
-
-function deleteRecord(dateKey) {
-  const records = normalizeRecords(readJSON('records', []));
-  const record = getRecordByDate(records, dateKey);
-  if (!record) return;
-  if (!confirm(`确定删除 ${record.label} 这条灵感记录吗？\n\n只会删除整理后的记录，不会删除当天聊天内容。`)) return;
-
-  localStorage.setItem('records', JSON.stringify(records.filter(item => item.date !== dateKey)));
-
-  if (recordEditingDate === dateKey) {
-    recordEditingDate = null;
-    recordEditDraft = '';
-  }
-
-  const autoRunState = getAutoSummarizeRunState();
-  if (autoRunState?.dateKey === dateKey) {
-    clearAutoSummarizeRunState();
-  }
-
-  renderRecords();
-  renderAutoSummarizeStatus();
-  showToast('已删除这条记录');
 }
 
 function startEditRecord(dateKey) {
