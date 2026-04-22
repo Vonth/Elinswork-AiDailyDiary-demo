@@ -88,6 +88,9 @@ document.getElementById('today-label').textContent =
   new Date().toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
 
 const AI_REQUEST_TIMEOUT_MS = 45000;
+const AUTO_SUMMARIZE_STATE_KEY = 'auto-summarize-run';
+const AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS = AI_REQUEST_TIMEOUT_MS * 2 + 15000;
+const AUTO_SUMMARIZE_STALE_MS = AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS + 30000;
 const EXPORT_APP_ID = 'elinswork-ai-daily-diary';
 const EXPORT_VERSION = 1;
 let sessions = [];
@@ -124,6 +127,67 @@ function readJSON(key, fallback) {
     console.warn(`无法解析本地存储：${key}`, error);
     return fallback;
   }
+}
+
+function getAutoSummarizeRunState() {
+  const state = readJSON(AUTO_SUMMARIZE_STATE_KEY, null);
+  return state && typeof state === 'object' ? state : null;
+}
+
+function persistAutoSummarizeRunState(patch = {}) {
+  const next = { ...(getAutoSummarizeRunState() || {}), ...patch };
+  localStorage.setItem(AUTO_SUMMARIZE_STATE_KEY, JSON.stringify(next));
+  return next;
+}
+
+function clearAutoSummarizeRunState() {
+  localStorage.removeItem(AUTO_SUMMARIZE_STATE_KEY);
+}
+
+function isAutoSummarizeRunStateStale(state) {
+  return !!state?.startedAt && (Date.now() - state.startedAt > AUTO_SUMMARIZE_STALE_MS);
+}
+
+function finalizeAutoSummarizeRunState(dateKey, tone, message) {
+  return persistAutoSummarizeRunState({
+    dateKey,
+    status: tone,
+    tone,
+    message,
+    startedAt: null,
+    finishedAt: Date.now()
+  });
+}
+
+function withPromiseTimeout(promise, timeoutMs, timeoutMessage, onTimeout = null) {
+  let settled = false;
+  let timer = null;
+  return new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        onTimeout?.();
+      } catch (error) {
+        console.warn('Timeout cleanup failed:', error);
+      }
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    Promise.resolve(promise)
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 function isChatMessage(msg) {
@@ -832,7 +896,9 @@ function saveSettings() {
 }
 
 function saveAutoSetting() {
-  localStorage.setItem('auto-summarize', document.getElementById('auto-toggle').checked ? 'on' : 'off');
+  const enabled = document.getElementById('auto-toggle').checked;
+  localStorage.setItem('auto-summarize', enabled ? 'on' : 'off');
+  if (!enabled) clearAutoSummarizeRunState();
   renderAutoSummarizeStatus();
 }
 
@@ -961,6 +1027,26 @@ function getAutoSummarizeStatus() {
   const hasYesterdayChats = ySessions.some(session => session.messages.length > 0);
   const records = normalizeRecords(readJSON('records', []));
   const alreadySummarized = records.some(record => record.date === yk);
+  const runState = getAutoSummarizeRunState();
+
+  if (runState?.dateKey === yk) {
+    if (runState.status === 'running') {
+      if (isAutoSummarizeRunStateStale(runState)) {
+        finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理似乎卡住了，重新打开页面后会再试一次，也可以手动整理。');
+        return { tone: 'warn', message: '上次自动整理似乎卡住了，重新打开页面后会再试一次，也可以手动整理。' };
+      }
+      return { tone: runState.tone || 'info', message: runState.message || '正在自动整理昨天的记录…' };
+    }
+    if (runState.status === 'warn') {
+      return { tone: 'warn', message: runState.message };
+    }
+    if (runState.status === 'error' && !alreadySummarized) {
+      return { tone: 'error', message: runState.message };
+    }
+    if (runState.status === 'success' && alreadySummarized) {
+      return { tone: 'success', message: runState.message };
+    }
+  }
 
   if (new Date().getHours() < 4) {
     return { tone: 'info', message: '已开启。每天凌晨 4 点后首次打开 App 时，会检查前一天的聊天。' };
@@ -1260,17 +1346,19 @@ function getAnthropicReply(data) {
 }
 
 async function fetchWithTimeout(url, options, requestLabel, timeoutMs = AI_REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await withPromiseTimeout(
+      fetch(url, controller ? { ...options, signal: controller.signal } : options),
+      timeoutMs,
+      `${requestLabel}超时了，请检查网络或稍后再试`,
+      () => controller?.abort()
+    );
   } catch (error) {
     if (error?.name === 'AbortError') {
       throw new Error(`${requestLabel}超时了，请检查网络或稍后再试`);
     }
     throw error;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -1499,29 +1587,77 @@ async function checkAutoSummarize() {
   if (!hasKey()) return;
   if (new Date().getHours() < 4) return;
   const yk = getYesterdayKey();
+  const existingRun = getAutoSummarizeRunState();
+  if (existingRun?.dateKey === yk && existingRun.status === 'running') {
+    if (isAutoSummarizeRunStateStale(existingRun)) {
+      finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
+    } else {
+      renderAutoSummarizeStatus({
+        tone: existingRun.tone || 'info',
+        message: existingRun.message || '正在自动整理昨天的记录…'
+      });
+      return;
+    }
+  }
   const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
   if (!ySessions.some(s => s.messages && s.messages.length > 0)) return;
   const records = normalizeRecords(readJSON('records', []));
-  if (records.some(r => r.date === yk)) return;
+  if (records.some(r => r.date === yk)) {
+    if (existingRun?.dateKey === yk && existingRun.status === 'running') {
+      finalizeAutoSummarizeRunState(yk, 'success', '昨天的聊天已经整理过了。');
+    }
+    return;
+  }
+  const runStartedAt = Date.now();
+  persistAutoSummarizeRunState({
+    dateKey: yk,
+    status: 'running',
+    tone: 'info',
+    message: '正在生成昨天的记录…',
+    startedAt: runStartedAt,
+    finishedAt: null
+  });
   renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
   showToast('正在整理昨日记录…', 60000);
   try {
-    const result = await summarizeDate(yk, ySessions, {
-      continueOnMemoryError: true,
-      onProgress: (step) => {
-        if (step === 'record_start') {
-          renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
-          return;
+    const result = await withPromiseTimeout(
+      summarizeDate(yk, ySessions, {
+        continueOnMemoryError: true,
+        onProgress: (step) => {
+          if (step === 'record_start') {
+            persistAutoSummarizeRunState({
+              dateKey: yk,
+              status: 'running',
+              tone: 'info',
+              message: '正在生成昨天的记录…',
+              startedAt: runStartedAt,
+              finishedAt: null
+            });
+            renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
+            return;
+          }
+          if (step === 'memory_start') {
+            persistAutoSummarizeRunState({
+              dateKey: yk,
+              status: 'running',
+              tone: 'info',
+              message: '昨天记录已生成，正在更新 AI 记忆…',
+              startedAt: runStartedAt,
+              finishedAt: null
+            });
+            renderAutoSummarizeStatus({ tone: 'info', message: '昨天记录已生成，正在更新 AI 记忆…' });
+          }
         }
-        if (step === 'memory_start') {
-          renderAutoSummarizeStatus({ tone: 'info', message: '昨天记录已生成，正在更新 AI 记忆…' });
-        }
-      }
-    });
+      }),
+      AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS,
+      '自动整理超时了，稍后可以重试，或者手动整理。'
+    );
     if (result.memoryUpdated) {
+      finalizeAutoSummarizeRunState(yk, 'success', '昨天记录已自动整理完成。');
       renderAutoSummarizeStatus({ tone: 'success', message: '昨天记录已自动整理完成。' });
       showToast('昨日记录已整理好 ✓');
     } else {
+      finalizeAutoSummarizeRunState(yk, 'warn', '昨天记录已生成，但更新 AI 记忆失败了。');
       renderAutoSummarizeStatus({ tone: 'warn', message: '昨天记录已生成，但更新 AI 记忆失败了。' });
       showToast('昨日记录已生成，AI 记忆更新失败');
     }
@@ -1529,6 +1665,7 @@ async function checkAutoSummarize() {
     const timeoutMessage = /超时/.test(e.message || '')
       ? '自动整理超时了，稍后可以重试，或者手动整理。'
       : '自动整理失败了，稍后仍可以手动整理。';
+    finalizeAutoSummarizeRunState(yk, 'error', timeoutMessage);
     renderAutoSummarizeStatus({ tone: 'error', message: timeoutMessage });
     showToast(/超时/.test(e.message || '') ? '自动整理超时了，可稍后重试' : '自动整理失败，可手动整理');
   }
