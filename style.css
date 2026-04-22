@@ -140,6 +140,8 @@ textarea:focus { border-color: #b4b2a9; }
 .record-badge { font-size: 11px; color: #7b7a74; background: #f3f0e8; border: 1px solid #e8e2d6; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .record-link-btn { font-size: 12px; color: #5f5e5a; background: transparent; border: none; padding: 0; cursor: pointer; font-family: inherit; }
 .record-link-btn:hover { color: #2c2c2a; text-decoration: underline; }
+.record-link-btn.danger { color: #a32d2d; }
+.record-link-btn.danger:hover { color: #8b2323; }
 .record-content { font-size: 14px; line-height: 1.8; color: #2c2c2a; white-space: pre-wrap; }
 .record-edit-area { display: flex; flex-direction: column; gap: 10px; }
 .record-editor { width: 100%; min-height: 160px; resize: vertical; font-size: 14px; line-height: 1.8; color: #2c2c2a; background: #faf9f7; border: 1px solid #e8e6e0; border-radius: 10px; padding: 11px 13px; font-family: inherit; outline: none; }
@@ -388,6 +390,8 @@ textarea,
 :root[data-theme='dark'] .record-badge { color: #c6c0b5; background: #2f302c; border-color: #474842; }
 :root[data-theme='dark'] .record-link-btn { color: #cfc8bc; }
 :root[data-theme='dark'] .record-link-btn:hover { color: #ece7dc; }
+:root[data-theme='dark'] .record-link-btn.danger { color: #f0aaaa; }
+:root[data-theme='dark'] .record-link-btn.danger:hover { color: #ffd4d4; }
 :root[data-theme='dark'] .record-editor { color: #ece7dc; border-color: #474842; }
 :root[data-theme='dark'] .record-editor:focus { border-color: #8c877d; background: #30312c; }
 :root[data-theme='dark'] .status-note.status-muted { color: #c6c0b5; }

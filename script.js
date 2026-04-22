@@ -1309,6 +1309,9 @@ async function regenMsg(i) {
 
 // ── AI 调用 ───────────────────────────────────────────────────────────────────
 
+
+// ── AI 调用 ───────────────────────────────────────────────────────────────────
+
 async function readJSONResponse(res, providerLabel, timeoutMs = AI_REQUEST_TIMEOUT_MS) {
   const text = await withPromiseTimeout(
     res.text(),
@@ -1700,6 +1703,7 @@ function renderRecords() {
         <div class="record-head">
           <div class="record-date">${r.label}</div>
           <div class="record-tools">
+            ${isEditing ? '' : `<button class="record-link-btn danger" onclick="deleteRecord('${r.date}')">删除</button>`}
             ${r.edited ? '<span class="record-badge">已修改</span>' : ''}
             ${isEditing ? '' : `
               ${canRestore ? `<button class="record-link-btn" onclick="restoreRecordToOriginal('${r.date}')">恢复原稿</button>` : ''}
@@ -1750,6 +1754,29 @@ function toggleRaw(btn) {
   const rawDiv = btn.nextElementSibling;
   const open = rawDiv.classList.toggle('open');
   btn.textContent = open ? '收起对话 ▴' : '查看原始对话 ▾';
+}
+
+function deleteRecord(dateKey) {
+  const records = normalizeRecords(readJSON('records', []));
+  const record = getRecordByDate(records, dateKey);
+  if (!record) return;
+  if (!confirm(`确定删除 ${record.label} 这条灵感记录吗？\n\n只会删除整理后的记录，不会删除当天聊天内容。`)) return;
+
+  localStorage.setItem('records', JSON.stringify(records.filter(item => item.date !== dateKey)));
+
+  if (recordEditingDate === dateKey) {
+    recordEditingDate = null;
+    recordEditDraft = '';
+  }
+
+  const autoRunState = getAutoSummarizeRunState();
+  if (autoRunState?.dateKey === dateKey) {
+    clearAutoSummarizeRunState();
+  }
+
+  renderRecords();
+  renderAutoSummarizeStatus();
+  showToast('已删除这条记录');
 }
 
 function startEditRecord(dateKey) {
