@@ -1588,16 +1588,9 @@ async function checkAutoSummarize() {
   if (new Date().getHours() < 4) return;
   const yk = getYesterdayKey();
   const existingRun = getAutoSummarizeRunState();
-  if (existingRun?.dateKey === yk && existingRun.status === 'running') {
-    if (isAutoSummarizeRunStateStale(existingRun)) {
-      finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
-    } else {
-      renderAutoSummarizeStatus({
-        tone: existingRun.tone || 'info',
-        message: existingRun.message || '正在自动整理昨天的记录…'
-      });
-      return;
-    }
+  iif (existingRun?.dateKey === yk && existingRun.status === 'running') {
+    // 页面刷新后上一次的异步请求已经终止，直接重试，不管时间多短
+    finalizeAutoSummarizeRunState(yk, 'warn', '上次自动整理没有完成，这次会重新试一次。');
   }
   const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
   if (!ySessions.some(s => s.messages && s.messages.length > 0)) return;
