@@ -107,7 +107,6 @@ let sessionTitleDraft = '';
 let recordEditingDate = null;
 let recordEditDraft = '';
 let composerMenuOpen = false;
-let isAutoSummarizeInProgress = false;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function formatDateLabel(dateKey) {
@@ -940,12 +939,19 @@ function hasTodayChats() {
 
 function renderSummarizeAction() {
   const hasChats = hasTodayChats();
+  const yk = getYesterdayKey();
+  const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
+  const hasYesterdayChats = ySessions.some(s => s.messages.length > 0);
+  const records = normalizeRecords(readJSON('records', []));
+  const hasYesterdayRecord = records.some(r => r.date === yk);
+  const showYesterdayBtn = hasYesterdayChats && !hasYesterdayRecord;
+
   const bar = document.getElementById('records-topbar');
   const btn = document.getElementById('btn-summarize');
-  if (bar) bar.style.display = hasChats ? '' : 'none';
-  if (!btn) return;
-  btn.style.display = hasChats ? '' : 'none';
-  btn.disabled = isChatRequestPending || !hasChats;
+  const btnY = document.getElementById('btn-summarize-yesterday');
+  if (bar) bar.style.display = (hasChats || showYesterdayBtn) ? '' : 'none';
+  if (btn) { btn.style.display = hasChats ? '' : 'none'; btn.disabled = isChatRequestPending || !hasChats; }
+  if (btnY) { btnY.style.display = showYesterdayBtn ? '' : 'none'; btnY.disabled = isChatRequestPending; }
 }
 
 function renderComposerState() {
@@ -1168,9 +1174,6 @@ renderAutoSummarizeStatus();
 renderVoiceStatus();
 document.addEventListener('click', handleDocumentClick);
 document.addEventListener('keydown', handleDocumentKeydown);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') checkAutoSummarize();
-});
 checkAutoSummarize();
 maybeAutoNameSession(sessions[currentIdx]?.id);
 
@@ -1584,10 +1587,32 @@ async function summarize() {
   btn.disabled = false; btn.textContent = '整理今日记录';
 }
 
+async function summarizeYesterday() {
+  if (isChatRequestPending) {
+    showToast('请先等待当前回复完成');
+    return;
+  }
+  const yk = getYesterdayKey();
+  const ySessions = normalizeSessions(readJSON('sessions-' + yk, []));
+  if (!ySessions.some(s => s.messages.length > 0)) return;
+  const btn = document.getElementById('btn-summarize-yesterday');
+  if (btn) { btn.disabled = true; btn.textContent = '整理中…'; }
+  try {
+    const result = await summarizeDate(yk, ySessions, {
+      continueOnMemoryError: true,
+      onProgress: (step) => {
+        if (btn) btn.textContent = step === 'memory_start' ? '更新记忆中…' : '整理中…';
+      }
+    });
+    renderRecords();
+    showToast(result.memoryUpdated ? '昨日记录已整理好 ✓' : '昨日记录已生成，AI 记忆更新失败');
+  } catch(e) { alert('整理失败：' + e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = '整理昨天记录'; }
+}
+
 // ── 自动整理 ──────────────────────────────────────────────────────────────────
 
 async function checkAutoSummarize() {
-  if (isAutoSummarizeInProgress) return;
   if (localStorage.getItem('auto-summarize') !== 'on') return;
   if (!hasKey()) return;
   if (new Date().getHours() < 4) return;
@@ -1614,7 +1639,6 @@ async function checkAutoSummarize() {
     return;
   }
   const runStartedAt = Date.now();
-  isAutoSummarizeInProgress = true;
   persistAutoSummarizeRunState({
     dateKey: yk,
     status: 'running',
@@ -1674,8 +1698,6 @@ async function checkAutoSummarize() {
     finalizeAutoSummarizeRunState(yk, 'error', timeoutMessage);
     renderAutoSummarizeStatus({ tone: 'error', message: timeoutMessage });
     showToast(/超时/.test(e.message || '') ? '自动整理超时了，可稍后重试' : '自动整理失败，可手动整理');
-  } finally {
-    isAutoSummarizeInProgress = false;
   }
 }
 
