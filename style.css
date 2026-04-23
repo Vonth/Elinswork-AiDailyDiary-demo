@@ -710,8 +710,8 @@ textarea:focus { border-color: #a09e97; }
   .toast { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 76px); }
 
   /* 输入框优化 */
-  .composer-shell { border-radius: 16px; }
-  .composer-shell textarea { min-height: 54px; padding: 12px 104px 12px 14px; }
+  .composer-shell { min-height: 78px; border-radius: 16px; }
+  .composer-shell textarea { min-height: 78px; padding: 14px 104px 14px 14px; }
   .composer-actions { right: 8px; bottom: 8px; gap: 5px; }
   .btn-mic { width: 34px; height: 34px; border-radius: 9px; }
   .composer-send-btn { min-width: 48px; height: 34px; padding: 0 11px; font-size: 12px; }
