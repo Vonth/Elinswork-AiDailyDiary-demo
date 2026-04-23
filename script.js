@@ -109,6 +109,9 @@ let recordEditDraft = '';
 let composerMenuOpen = false;
 let isAutoSummarizeInProgress = false;
 let toastTimer = null;
+let sessionSwipeStartX = 0;
+let sessionSwipeStartY = 0;
+let sessionSwipeTracking = false;
 function currentMsgs() { return sessions[currentIdx].messages; }
 
 function formatDateLabel(dateKey) {
@@ -662,8 +665,11 @@ function renderSessionNav() {
   const canAiRename = !isChatRequestPending && canAutoNameSession(current) && hasKey();
   const isTitlePending = current?.id === sessionTitlePendingId;
   const isEditingTitle = current?.id === sessionTitleEditingId;
+  const swipeHint = total > 1
+    ? '左右滑动切换话题'
+    : '需要时可以新建话题';
   document.getElementById('session-nav').innerHTML =
-    `<div class="session-nav-main">
+    `<div class="session-nav-main ${isEditingTitle ? 'editing' : ''}">
         <button class="nav-btn" onclick="gotoSession(${i-1})" ${i===0?'disabled':''}>←</button>
         <div class="nav-label ${isEditingTitle ? 'editing' : ''}">
           ${isEditingTitle ? `
@@ -681,6 +687,7 @@ function renderSessionNav() {
           ` : `
             <div class="nav-title">${esc(getSessionDisplayTitle(current, i))}</div>
             <div class="nav-meta">${esc(getSessionMetaLabel(current, i, total))}</div>
+            <div class="nav-swipe-tip">${esc(swipeHint)}</div>
           `}
         </div>
         <button class="nav-btn" onclick="gotoSession(${i+1})" ${i===total-1?'disabled':''}>→</button>
@@ -697,6 +704,8 @@ function renderSessionNav() {
         `}
         <button class="nav-btn" onclick="newSession()">＋ 新话题</button>
       </div>`;
+
+  renderCurrentSessionSubtitle();
 
   if (isEditingTitle) {
     setTimeout(() => {
@@ -796,6 +805,77 @@ function maybeAutoNameSession(sessionId) {
   if (sessionTitleEditingId === sessionId) return;
   if (isChatRequestPending || !hasKey() || !canAutoNameSession(session)) return;
   requestSessionTitleById(sessionId, { forceRename: false, silent: true });
+}
+
+function getCurrentSessionSubtitleText() {
+  const session = sessions[currentIdx];
+  if (!session) return '';
+  if (sessions.length === 1 && !session.title && !session.messages.length) return '';
+  return getSessionDisplayTitle(session, currentIdx);
+}
+
+function renderCurrentSessionSubtitle() {
+  const el = document.getElementById('current-session-subtitle');
+  if (!el) return;
+  const subtitle = getCurrentSessionSubtitleText();
+  el.textContent = subtitle;
+  el.style.display = subtitle ? '' : 'none';
+  if (subtitle) {
+    el.setAttribute('title', subtitle);
+  } else {
+    el.removeAttribute('title');
+  }
+}
+
+function isChatPanelVisible() {
+  return document.getElementById('panel-chat')?.style.display !== 'none';
+}
+
+function shouldIgnoreSessionSwipeTarget(target) {
+  if (!target) return true;
+  if (!isChatPanelVisible()) return true;
+  if (sessionTitleEditingId != null) return true;
+  return !!target.closest('.session-nav, .composer-shell, button, input, textarea, select, label, a');
+}
+
+function handleSessionSwipeStart(event) {
+  if (event.touches.length !== 1) {
+    sessionSwipeTracking = false;
+    return;
+  }
+  if (sessions.length <= 1 || shouldIgnoreSessionSwipeTarget(event.target)) {
+    sessionSwipeTracking = false;
+    return;
+  }
+  const touch = event.touches[0];
+  sessionSwipeStartX = touch.clientX;
+  sessionSwipeStartY = touch.clientY;
+  sessionSwipeTracking = true;
+}
+
+function handleSessionSwipeEnd(event) {
+  if (!sessionSwipeTracking) return;
+  sessionSwipeTracking = false;
+  const touch = event.changedTouches?.[0];
+  if (!touch) return;
+
+  const deltaX = touch.clientX - sessionSwipeStartX;
+  const deltaY = touch.clientY - sessionSwipeStartY;
+  const absX = Math.abs(deltaX);
+  const absY = Math.abs(deltaY);
+
+  if (absX < 70) return;
+  if (absX < absY * 1.35) return;
+
+  if (deltaX < 0) {
+    gotoSession(currentIdx + 1);
+  } else {
+    gotoSession(currentIdx - 1);
+  }
+}
+
+function cancelSessionSwipeTracking() {
+  sessionSwipeTracking = false;
 }
 
 async function requestSessionTitleById(sessionId, options = {}) {
@@ -1176,6 +1256,9 @@ renderAutoSummarizeStatus();
 renderVoiceStatus();
 document.addEventListener('click', handleDocumentClick);
 document.addEventListener('keydown', handleDocumentKeydown);
+document.getElementById('panel-chat')?.addEventListener('touchstart', handleSessionSwipeStart, { passive: true });
+document.getElementById('panel-chat')?.addEventListener('touchend', handleSessionSwipeEnd, { passive: true });
+document.getElementById('panel-chat')?.addEventListener('touchcancel', cancelSessionSwipeTracking, { passive: true });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') checkAutoSummarize();
 });

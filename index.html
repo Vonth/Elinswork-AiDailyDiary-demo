@@ -17,8 +17,11 @@
 <div class="app">
 
   <div class="header">
-    <div>
+    <div class="header-copy">
+      <div class="header-title-row">
       <h1>灵感记录</h1>
+      <div class="header-session-subtitle" id="current-session-subtitle"></div>
+      </div>
       <div class="date" id="today-label"></div>
     </div>
     <div class="tabs">
@@ -29,7 +32,7 @@
   </div>
 
   <!-- 聊天 panel -->
-  <div class="panel" id="panel-chat">
+  <div class="panel session-swipe-surface" id="panel-chat">
     <div class="warning" id="api-warning">请先在「设置」里填入 API Key，然后选择使用 DeepSeek 或 Claude</div>
     <div class="session-nav" id="session-nav"></div>
     <div class="messages" id="messages"></div>
