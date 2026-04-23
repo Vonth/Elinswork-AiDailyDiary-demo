@@ -1698,67 +1698,6 @@ async function checkAutoSummarize() {
     isAutoSummarizeInProgress = false;
   }
 }
-    dateKey: yk,
-    status: 'running',
-    tone: 'info',
-    message: '正在生成昨天的记录…',
-    startedAt: runStartedAt,
-    finishedAt: null
-  });
-  renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
-  showToast('正在整理昨日记录…', 60000);
-  try {
-    const result = await withPromiseTimeout(
-      summarizeDate(yk, ySessions, {
-        continueOnMemoryError: true,
-        onProgress: (step) => {
-          if (step === 'record_start') {
-            persistAutoSummarizeRunState({
-              dateKey: yk,
-              status: 'running',
-              tone: 'info',
-              message: '正在生成昨天的记录…',
-              startedAt: runStartedAt,
-              finishedAt: null
-            });
-            renderAutoSummarizeStatus({ tone: 'info', message: '正在生成昨天的记录…' });
-            return;
-          }
-          if (step === 'memory_start') {
-            persistAutoSummarizeRunState({
-              dateKey: yk,
-              status: 'running',
-              tone: 'info',
-              message: '昨天记录已生成，正在更新 AI 记忆…',
-              startedAt: runStartedAt,
-              finishedAt: null
-            });
-            renderAutoSummarizeStatus({ tone: 'info', message: '昨天记录已生成，正在更新 AI 记忆…' });
-          }
-        }
-      }),
-      AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS,
-      '自动整理超时了，稍后可以重试，或者手动整理。'
-    );
-    if (result.memoryUpdated) {
-      finalizeAutoSummarizeRunState(yk, 'success', '昨天记录已自动整理完成。');
-      renderAutoSummarizeStatus({ tone: 'success', message: '昨天记录已自动整理完成。' });
-      showToast('昨日记录已整理好 ✓');
-    } else {
-      finalizeAutoSummarizeRunState(yk, 'warn', '昨天记录已生成，但更新 AI 记忆失败了。');
-      renderAutoSummarizeStatus({ tone: 'warn', message: '昨天记录已生成，但更新 AI 记忆失败了。' });
-      showToast('昨日记录已生成，AI 记忆更新失败');
-    }
-  } catch(e) {
-    const timeoutMessage = /超时/.test(e.message || '')
-      ? '自动整理超时了，稍后可以重试，或者手动整理。'
-      : '自动整理失败了，稍后仍可以手动整理。';
-    finalizeAutoSummarizeRunState(yk, 'error', timeoutMessage);
-    renderAutoSummarizeStatus({ tone: 'error', message: timeoutMessage });
-    showToast(/超时/.test(e.message || '') ? '自动整理超时了，可稍后重试' : '自动整理失败，可手动整理');
-  }
-}
-
 // ── 记录页 ────────────────────────────────────────────────────────────────────
 
 function renderRecords() {
