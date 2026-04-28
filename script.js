@@ -63,6 +63,8 @@ const SUMMARY_PROMPT = `你是用户的私人日记整理者。根据今天的�
 
 const MEMORY_PROMPT = `根据下面的对话内容和已有的用户记忆，更新用户画像。包含：用户正在做的事、关注的主题、近期情绪状态、性格偏好、上次聊到的重要内容。写成一段自然的描述，200字以内，用中文。只输出更新后的用户画像文字，不要任何前缀或说明。`;
 
+const L2_MEMORY_PROMPT = `根据刚才的对话，提炼3-5条值得长期记住的关键事件。每条用JSON格式输出，包含四个字段：date（日期，格式yyyy-mm-dd）、content（一句话描述）、emotion（high或normal）、tags（1-3个标签的数组）。只输出JSON数组，不要任何其他文字。`;
+
 const TITLE_PROMPT = `请根据这段对话，生成一个适合作为聊天话题标题的短中文标题。
 
 要求：
@@ -89,7 +91,7 @@ document.getElementById('today-label').textContent =
 
 const AI_REQUEST_TIMEOUT_MS = 45000;
 const AUTO_SUMMARIZE_STATE_KEY = 'auto-summarize-run';
-const AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS = AI_REQUEST_TIMEOUT_MS * 2 + 15000;
+const AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS = AI_REQUEST_TIMEOUT_MS * 3 + 15000;
 const AUTO_SUMMARIZE_STALE_MS = AUTO_SUMMARIZE_TOTAL_TIMEOUT_MS + 30000;
 const EXPORT_APP_ID = 'elinswork-ai-daily-diary';
 const EXPORT_VERSION = 1;
@@ -132,6 +134,41 @@ function readJSON(key, fallback) {
     console.warn(`无法解析本地存储：${key}`, error);
     return fallback;
   }
+}
+
+function parseJSONArrayText(text) {
+  const raw = String(text || '').trim();
+  const start = raw.indexOf('[');
+  const end = raw.lastIndexOf(']');
+  if (start < 0 || end < start) throw new Error('AI 没有返回 JSON 数组');
+  const parsed = JSON.parse(raw.slice(start, end + 1));
+  if (!Array.isArray(parsed)) throw new Error('AI 返回的不是 JSON 数组');
+  return parsed;
+}
+
+function normalizeL2MemoryEntries(entries) {
+  return Array.isArray(entries)
+    ? entries.map(entry => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      const date = isValidDateKey(entry.date) ? entry.date : '';
+      const content = typeof entry.content === 'string' ? entry.content.trim() : '';
+      const emotion = entry.emotion === 'high' ? 'high' : 'normal';
+      const tags = Array.isArray(entry.tags)
+        ? entry.tags
+          .filter(tag => typeof tag === 'string' && tag.trim())
+          .map(tag => tag.trim())
+          .slice(0, 3)
+        : [];
+      if (!date || !content || !tags.length) return null;
+      return { date, content, emotion, tags };
+    }).filter(Boolean)
+    : [];
+}
+
+function appendL2MemoryEntries(entries) {
+  const existing = normalizeL2MemoryEntries(readJSON('memory-l2', []));
+  const next = [...existing, ...entries].slice(-200);
+  localStorage.setItem('memory-l2', JSON.stringify(next));
 }
 
 function getAutoSummarizeRunState() {
@@ -654,7 +691,13 @@ function getYesterdayKey() {
 
 function getChatSystem() {
   const mem = localStorage.getItem('user-memory') || '';
-  return mem ? CHAT_SYSTEM_BASE + '\n\n关于用户的记忆：\n' + mem : CHAT_SYSTEM_BASE;
+  const l2Memories = normalizeL2MemoryEntries(readJSON('memory-l2', []))
+    .slice(-20)
+    .map(entry => `- [${entry.date}] ${entry.content}`);
+  let system = CHAT_SYSTEM_BASE;
+  if (mem) system += '\n\n关于用户的记忆：\n' + mem;
+  if (l2Memories.length) system += '\n\n近期关键记忆：\n' + l2Memories.join('\n');
+  return system;
 }
 
 // ── 话题导航 ──────────────────────────────────────────────────────────────────
@@ -1636,6 +1679,8 @@ async function summarizeDate(dateKey, dateSessions, options = {}) {
 
   reportProgress('memory_start');
   const existingMem = localStorage.getItem('user-memory') || '（暂无）';
+  let memoryUpdated = false;
+  let memoryError = null;
   try {
     const newMem = await callAI(
       [{ role: 'user', content: MEMORY_PROMPT + '\n\n已有记忆：\n' + existingMem + '\n\n今天的对话：\n' + conv }], null,
@@ -1643,14 +1688,29 @@ async function summarizeDate(dateKey, dateSessions, options = {}) {
     );
     localStorage.setItem('user-memory', newMem);
     renderMemoryPreview();
-    reportProgress('done');
-    return { content, memoryUpdated: true };
+    memoryUpdated = true;
   } catch (error) {
     console.warn('更新 AI 记忆失败：', error);
     reportProgress('memory_failed');
     if (!continueOnMemoryError) throw error;
-    return { content, memoryUpdated: false, memoryError: error };
+    memoryError = error;
   }
+
+  try {
+    const rawL2Memories = await callAI(
+      [{ role: 'user', content: L2_MEMORY_PROMPT + '\n\n刚才的对话：\n' + conv }], null,
+      { requestLabel: '提炼关键记忆' }
+    );
+    const l2Memories = normalizeL2MemoryEntries(parseJSONArrayText(rawL2Memories));
+    if (l2Memories.length) appendL2MemoryEntries(l2Memories);
+  } catch (error) {
+    console.warn('提炼 L2 关键记忆失败：', error);
+  }
+
+  reportProgress('done');
+  return memoryError
+    ? { content, memoryUpdated, memoryError }
+    : { content, memoryUpdated };
 }
 
 async function summarize() {
